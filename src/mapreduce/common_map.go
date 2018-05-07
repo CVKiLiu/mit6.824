@@ -5,7 +5,7 @@ import (
 )
 
 func doMap(
-	jobName string, // the name of the MapReduce job
+	jobName string, // the name of the MapReduce job1
 	mapTask int, // which map task this is
 	inFile string,
 	nReduce int, // the number of reduce task that will be run ("R" in the paper)
