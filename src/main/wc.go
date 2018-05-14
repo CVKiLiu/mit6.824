@@ -24,12 +24,14 @@ func mapF(filename string, contents string) []mapreduce.KeyValue {
 		return !unicode.IsLetter(c) && !unicode.IsNumber(c)
 	}
 	strSlice := strings.FieldsFunc(contents, f)
-	fmt.Println(strSlice)
+	//fmt.Println(strSlice)
 	keyValues := make([]mapreduce.KeyValue, len(strSlice))
-	for i, kv := range keyValues {
-		kv.Key = strSlice[i]
-		kv.Value = string(1)
+
+	for i, str := range strSlice {
+		keyValues[i].Key = str
+		keyValues[i].Value = strconv.Itoa(1)
 	}
+	fmt.Println(keyValues)
 	return keyValues
 }
 
