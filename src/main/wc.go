@@ -2,7 +2,11 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"os"
+	"strconv"
+	"strings"
+	"unicode"
 
 	"mit6.824/src/mapreduce"
 )
@@ -16,6 +20,17 @@ import (
 //
 func mapF(filename string, contents string) []mapreduce.KeyValue {
 	// Your code here (Part II).
+	f := func(c rune) bool {
+		return !unicode.IsLetter(c) && !unicode.IsNumber(c)
+	}
+	strSlice := strings.FieldsFunc(contents, f)
+	fmt.Println(strSlice)
+	keyValues := make([]mapreduce.KeyValue, len(strSlice))
+	for i, kv := range keyValues {
+		kv.Key = strSlice[i]
+		kv.Value = string(1)
+	}
+	return keyValues
 }
 
 //
@@ -25,6 +40,15 @@ func mapF(filename string, contents string) []mapreduce.KeyValue {
 //
 func reduceF(key string, values []string) string {
 	// Your code here (Part II).
+	sum := 0
+	for _, str := range values {
+		i, err := strconv.Atoi(str)
+		if err != nil {
+			log.Fatal("Unable to convert string to integer")
+		}
+		sum += i
+	}
+	return strconv.Itoa(sum)
 }
 
 // Can be run in 3 ways:

@@ -5,7 +5,8 @@ package main
 //
 
 import "time"
-import "viewservice"
+
+//import "viewservice"
 import "os"
 import "fmt"
 
