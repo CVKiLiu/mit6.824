@@ -64,30 +64,69 @@ func doMap(
 	/**
 	** the type of buf is []byte
 	**/
-	buf, err := ioutil.ReadFile(inFile)
+	bytes, err := ioutil.ReadFile(inFile)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "File Error: %s\n", err)
+		//log.Fatal("Unable to read file: ", inFile)
 	}
-	inFileContents := string(buf)
+	inFileContents := string(bytes)
 	//The return of function mapF is []KeyValue
-	mapFOutput := mapF(inFile, inFileContents)
-	for _, kv := range mapFOutput {
-		//hashtemp
-		hashtemp := ihash(kv.Key)
-		reducefileName := reduceName(jobName, mapTask, hashtemp%nReduce)
-		//打开文件
-		outputFile, outputErr := os.OpenFile(reducefileName, os.O_WRONLY|os.O_CREATE, 0666)
-		if outputErr != nil {
-			fmt.Fprintf(os.Stderr, "File Error: %s\n", err)
-		}
-		defer outputFile.Close()
+	kvpairs := mapF(inFile, inFileContents)
 
-		enc := json.NewEncoder(outputFile)
-		err := enc.Encode(kv)
+	encoders := make([]*json.Encoder, nReduce)
+	for reduceTaskIdx := 0; reduceTaskIdx < nReduce; reduceTaskIdx++ {
+		reduceFileName := reduceName(jobName, mapTask, reduceTaskIdx)
+		reduceFile, err := os.Create(reduceFileName)
 		if err != nil {
-			log.Println("Error in encodeing json")
+			log.Fatal("Unable to create file: ", err)
+		}
+		defer reduceFile.Close()
+		encoders[reduceTaskIdx] = json.NewEncoder(reduceFile)
+	}
+
+	for _, kv := range kvpairs {
+		idx := ihash(kv.Key) % nReduce
+		err := encoders[idx].Encode(&kv)
+		if err != nil {
+			log.Fatal("Unable to encode: ", err)
 		}
 	}
+	/*
+		for i := 0; i < nReduce; i++ {
+			reducefileName := reduceName(jobName, mapTask, i)
+			outputFile, outputErr := os.OpenFile(reducefileName, os.O_WRONLY|os.O_CREATE, 0666)
+			if outputErr != nil {
+				fmt.Fprintf(os.Stderr, "File Error: %s\n", err)
+			}
+			defer outputFile.Close()
+			enc := json.NewEncoder(outputFile)
+			for _, kv := range mapFOutput {
+				if ihash(kv.Key)%nReduce == i {
+					err := enc.Encode(&kv)
+					if err != nil {
+						log.Fatal("doMap: encode error: ", err)
+					}
+				}
+			}
+		}*/
+	/*
+		for _, kv := range mapFOutput {
+			//hashtemp
+			hashtemp := ihash(kv.Key)
+			reducefileName := reduceName(jobName, mapTask, hashtemp%nReduce)
+			//打开文件
+			outputFile, outputErr := os.OpenFile(reducefileName, os.O_WRONLY|os.O_CREATE, 0666)
+			if outputErr != nil {
+				fmt.Fprintf(os.Stderr, "File Error: %s\n", err)
+			}
+			defer outputFile.Close()
+
+			enc := json.NewEncoder(outputFile)
+			err := enc.Encode(kv)
+			if err != nil {
+				log.Println("Error in encodeing json")
+			}
+		}*/
 }
 
 func ihash(s string) int {
