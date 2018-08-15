@@ -25,7 +25,7 @@ const (
 // Split in words
 func MapFunc(file string, value string) (res []KeyValue) {
 	debug("Map %v\n", value)
-	words := strings.Fields(value)
+	words := strings.Fields(value)//空白符分割
 	for _, w := range words {
 		kv := KeyValue{w, ""}
 		res = append(res, kv)
@@ -130,7 +130,7 @@ func port(suffix string) string {
 }
 
 func setup() *Master {
-	files := makeInputs(nMap)
+	files := makeInputs(nMap)// Make files
 	master := port("master")
 	mr := Distributed("test", files, nReduce, master)
 	return mr

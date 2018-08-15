@@ -103,7 +103,7 @@ func (mr *Master) forwardRegistrations(ch chan string) {
 // Distributed schedules map and reduce tasks on workers that register with the
 // master over RPC.
 func Distributed(jobName string, files []string, nreduce int, master string) (mr *Master) {
-	mr = newMaster(master)
+	mr = newMaster(master)//主机
 	mr.startRPCServer()
 	go mr.run(jobName, files, nreduce,
 		func(phase jobPhase) {

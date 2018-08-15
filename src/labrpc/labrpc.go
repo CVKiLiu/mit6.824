@@ -49,24 +49,30 @@ package labrpc
 //   pass svc to srv.AddService()
 //
 
-import "mit6.824/src/labgob"
-import "bytes"
-import "reflect"
-import "sync"
-import "log"
-import "strings"
-import "math/rand"
-import "time"
-import "sync/atomic"
+import (
+	"bytes"
+	"fmt"
+	"log"
+	"math/rand"
+	"reflect"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
 
+	"mit6.824/src/labgob"
+)
+
+//regMsg Request message
 type reqMsg struct {
 	endname  interface{} // name of sending ClientEnd
-	svcMeth  string      // e.g. "Raft.AppendEntries"
+	svcMeth  string      // e.g. "Raft.AppendEntries" service method
 	argsType reflect.Type
 	args     []byte
 	replyCh  chan replyMsg
 }
 
+//replayMsg Reply Message
 type replyMsg struct {
 	ok    bool
 	reply []byte
@@ -134,7 +140,7 @@ func MakeNetwork() *Network {
 	rn.enabled = map[interface{}]bool{}
 	rn.servers = map[interface{}]*Server{}
 	rn.connections = map[interface{}](interface{}){}
-	rn.endCh = make(chan reqMsg)
+	rn.endCh = make(chan reqMsg) //接收end请求
 	rn.done = make(chan struct{})
 
 	// single goroutine to handle all ClientEnd.Call()s
@@ -295,7 +301,7 @@ func (rn *Network) ProcessReq(req reqMsg) {
 
 }
 
-// create a client end-point.
+//MakeEnd create a client end-point.
 // start the thread that listens and delivers.
 func (rn *Network) MakeEnd(endname interface{}) *ClientEnd {
 	rn.mu.Lock()
@@ -307,15 +313,16 @@ func (rn *Network) MakeEnd(endname interface{}) *ClientEnd {
 
 	e := &ClientEnd{}
 	e.endname = endname
-	e.ch = rn.endCh
+	e.ch = rn.endCh //ch      chan reqMsg  copy of Network.endCh
 	e.done = rn.done
-	rn.ends[endname] = e
+	rn.ends[endname] = e //Add end into network
 	rn.enabled[endname] = false
 	rn.connections[endname] = nil
 
 	return e
 }
 
+//AddServer Add server into network
 func (rn *Network) AddServer(servername interface{}, rs *Server) {
 	rn.mu.Lock()
 	defer rn.mu.Unlock()
@@ -323,6 +330,7 @@ func (rn *Network) AddServer(servername interface{}, rs *Server) {
 	rn.servers[servername] = rs
 }
 
+//DeleteServer Delete server from network
 func (rn *Network) DeleteServer(servername interface{}) {
 	rn.mu.Lock()
 	defer rn.mu.Unlock()
@@ -330,7 +338,7 @@ func (rn *Network) DeleteServer(servername interface{}) {
 	rn.servers[servername] = nil
 }
 
-// connect a ClientEnd to a server.
+//Connect connect a ClientEnd to a server.
 // a ClientEnd can only be connected once in its lifetime.
 func (rn *Network) Connect(endname interface{}, servername interface{}) {
 	rn.mu.Lock()
@@ -339,7 +347,7 @@ func (rn *Network) Connect(endname interface{}, servername interface{}) {
 	rn.connections[endname] = servername
 }
 
-// enable/disable a ClientEnd.
+//Enable enable/disable a ClientEnd.
 func (rn *Network) Enable(endname interface{}, enabled bool) {
 	rn.mu.Lock()
 	defer rn.mu.Unlock()
@@ -347,7 +355,7 @@ func (rn *Network) Enable(endname interface{}, enabled bool) {
 	rn.enabled[endname] = enabled
 }
 
-// get a server's count of incoming RPCs.
+//GetCount get a server's count of incoming RPCs.
 func (rn *Network) GetCount(servername interface{}) int {
 	rn.mu.Lock()
 	defer rn.mu.Unlock()
@@ -356,12 +364,13 @@ func (rn *Network) GetCount(servername interface{}) int {
 	return svr.GetCount()
 }
 
+//GetTotalCount ...
 func (rn *Network) GetTotalCount() int {
 	x := atomic.LoadInt32(&rn.count)
 	return int(x)
 }
 
-//
+//Server ...
 // a server is a collection of services, all sharing
 // the same rpc dispatcher. so that e.g. both a Raft
 // and a k/v server can listen to the same rpc endpoint.
@@ -372,12 +381,14 @@ type Server struct {
 	count    int // incoming RPCs
 }
 
+//MakeServer ...
 func MakeServer() *Server {
 	rs := &Server{}
 	rs.services = map[string]*Service{}
 	return rs
 }
 
+//AddService ...
 func (rs *Server) AddService(svc *Service) {
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
@@ -441,6 +452,7 @@ func MakeService(rcvr interface{}) *Service {
 		//fmt.Printf("%v pp %v ni %v 1k %v 2k %v no %v\n",
 		//	mname, method.PkgPath, mtype.NumIn(), mtype.In(1).Kind(), mtype.In(2).Kind(), mtype.NumOut())
 
+		fmt.Println(method.PkgPath)
 		if method.PkgPath != "" || // capitalized?
 			mtype.NumIn() != 3 ||
 			//mtype.In(1).Kind() != reflect.Ptr ||
@@ -453,7 +465,6 @@ func MakeService(rcvr interface{}) *Service {
 			svc.methods[mname] = method
 		}
 	}
-
 	return svc
 }
 

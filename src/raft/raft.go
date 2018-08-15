@@ -17,8 +17,13 @@ package raft
 //   in the same server.
 //
 
-import "sync"
-import "mit6.824/src/labrpc"
+import (
+	"bytes"
+	"sync"
+
+	"mit6.824/src/labgob"
+	"mit6.824/src/labrpc"
+)
 
 // import "bytes"
 // import "labgob"
@@ -40,6 +45,14 @@ type ApplyMsg struct {
 	CommandIndex int
 }
 
+//RaftLog log entry
+//Each entry contains command for state machine,
+//and term when entry was received by leader(first index is 1)
+type raftLog struct {
+	command []byte
+	term    int
+}
+
 //
 // A Go object implementing a single Raft peer.
 //
@@ -53,8 +66,28 @@ type Raft struct {
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
 
+	isLeader bool
+	/**
+	*	Persistent state on all servers
+	**/
+	currentTerm int       //Last term server has seen(initialized to on first boot, increases monotonically)
+	voteFor     int       //candidateId that received vote in current term(or null if none)
+	logEntries  []raftLog //log entries;
+
+	/**
+	*	Volatile state on all servers
+	**/
+	commitIndex int //index of highest log entry known to be committed(initialized to 0, increases monotonically)
+	lastApplied int //index of highest log entry applied to state machine
+
+	/**
+	*	Volatile state on leaders
+	**/
+	nextIndex  []int //for each server, index of the next log entry to send to that server(initialized to leader last log index +1)
+	matchIndex []int //for each server, index of highest log entry known to be replicated on server.
 }
 
+//GetState ...
 // return currentTerm and whether this server
 // believes it is the leader.
 func (rf *Raft) GetState() (int, bool) {
@@ -62,6 +95,8 @@ func (rf *Raft) GetState() (int, bool) {
 	var term int
 	var isleader bool
 	// Your code here (2A).
+	term = rf.currentTerm
+	isleader = rf.isLeader
 	return term, isleader
 }
 
@@ -79,6 +114,14 @@ func (rf *Raft) persist() {
 	// e.Encode(rf.yyy)
 	// data := w.Bytes()
 	// rf.persister.SaveRaftState(data)
+	w := new(bytes.Buffer)
+	enc := labgob.NewEncoder(w)
+	enc.Encode(rf.currentTerm)
+	enc.Encode(rf.voteFor)
+	enc.Encode(rf.logEntries)
+	data := w.Bytes()
+	rf.persister.SaveRaftState(data)
+
 }
 
 //
@@ -109,6 +152,10 @@ func (rf *Raft) readPersist(data []byte) {
 //
 type RequestVoteArgs struct {
 	// Your data here (2A, 2B).
+	Term         int //candidate's term
+	CandidateID  int //candidate requesting vote
+	LastLogIndex int //index of candidate's last log entry
+	LastLogTerm  int //term of candidate's last log entry
 }
 
 //
@@ -117,6 +164,8 @@ type RequestVoteArgs struct {
 //
 type RequestVoteReply struct {
 	// Your data here (2A).
+	Term        int  //currentTerm, for candidate to update itself
+	VoteGranted bool //true means candidate received vote
 }
 
 //
