@@ -70,7 +70,7 @@ func make_config(t *testing.T, n int, unreliable bool) *config {
 	cfg := &config{}
 	cfg.t = t
 	//MakeNetWork 创建一个网络环境，并且在该网络环境中运行一个协程，用来处理用户端的调用
-	//网络环境包括：客户端、服务器、客户端与服务器之间的连接
+	//网络环境包括：客户端、服务器、客户端与服务器之间的连接.
 	cfg.net = labrpc.MakeNetwork()
 	cfg.n = n
 	cfg.applyErr = make([]string, cfg.n)
