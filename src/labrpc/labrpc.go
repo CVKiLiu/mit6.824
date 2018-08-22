@@ -133,6 +133,8 @@ type Network struct {
 	count          int32         // total RPC count, for statistics
 }
 
+//MakeNetWork 创建一个网络环境，并且在该网络环境中运行一个协程，用来处理用户端的调用
+//网络环境包括：客户端、服务器、客户端与服务器之间的连接
 func MakeNetwork() *Network {
 	rn := &Network{}
 	rn.reliable = true
@@ -316,6 +318,9 @@ func (rn *Network) MakeEnd(endname interface{}) *ClientEnd {
 	e.ch = rn.endCh //ch      chan reqMsg  copy of Network.endCh
 	e.done = rn.done
 	rn.ends[endname] = e //Add end into network
+	for key, value := range rn.ends {
+		rn.ends[key] = value
+	}
 	rn.enabled[endname] = false
 	rn.connections[endname] = nil
 

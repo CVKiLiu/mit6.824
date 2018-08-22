@@ -8,17 +8,20 @@ package raft
 // test with the original before submitting.
 //
 
-import "mit6.824/src/labrpc"
-import "log"
-import "sync"
-import "testing"
-import "runtime"
-import "math/rand"
-import crand "crypto/rand"
-import "math/big"
-import "encoding/base64"
-import "time"
-import "fmt"
+import (
+	crand "crypto/rand"
+	"encoding/base64"
+	"fmt"
+	"log"
+	"math/big"
+	"math/rand"
+	"runtime"
+	"sync"
+	"testing"
+	"time"
+
+	"mit6.824/src/labrpc"
+)
 
 func randstring(n int) string {
 	b := make([]byte, 2*n)
@@ -66,13 +69,15 @@ func make_config(t *testing.T, n int, unreliable bool) *config {
 	runtime.GOMAXPROCS(4)
 	cfg := &config{}
 	cfg.t = t
+	//MakeNetWork 创建一个网络环境，并且在该网络环境中运行一个协程，用来处理用户端的调用
+	//网络环境包括：客户端、服务器、客户端与服务器之间的连接
 	cfg.net = labrpc.MakeNetwork()
 	cfg.n = n
 	cfg.applyErr = make([]string, cfg.n)
 	cfg.rafts = make([]*Raft, cfg.n)
 	cfg.connected = make([]bool, cfg.n)
 	cfg.saved = make([]*Persister, cfg.n)
-	cfg.endnames = make([][]string, cfg.n)
+	cfg.endnames = make([][]string, cfg.n) // n*n array
 	cfg.logs = make([]map[int]int, cfg.n)
 	cfg.start = time.Now()
 
@@ -148,6 +153,14 @@ func (cfg *config) start1(i int) {
 		ends[j] = cfg.net.MakeEnd(cfg.endnames[i][j])
 		cfg.net.Connect(cfg.endnames[i][j], j)
 	}
+	/*
+		var logContext string
+		_, curFile, curLine, ok := runtime.Caller(1)
+		logContext.append(strings.Trim(path.Base(curFile), "go"))
+		for key, value := range cfg.net.ends {
+
+		}
+	*/
 
 	cfg.mu.Lock()
 
