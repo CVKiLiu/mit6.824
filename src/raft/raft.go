@@ -21,8 +21,8 @@ import (
 	"bytes"
 	"sync"
 
-	"mit6.824/src/labgob"
-	"mit6.824/src/labrpc"
+	"labgob"
+	"labrpc"
 )
 
 // import "bytes"

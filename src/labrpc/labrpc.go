@@ -60,7 +60,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"mit6.824/src/labgob"
+	"labgob"
 )
 
 //regMsg Request message

@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"mit6.824/src/labrpc"
+	"labrpc"
 )
 
 func randstring(n int) string {
