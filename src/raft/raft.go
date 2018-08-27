@@ -150,9 +150,9 @@ func (rf *Raft) readPersist(data []byte) {
 	var currentTerm int
 	var voteFor int
 	var logEntries []raftLog
-	if d.Decode(&currentTerm)!=nil || d.Decode(&voteFor)!= nil || d.Decode(&logEntries) != nil {
+	if d.Decode(&currentTerm) != nil || d.Decode(&voteFor) != nil || d.Decode(&logEntries) != nil {
 		log.Fatal("The data is not complete")
-	}else{
+	} else {
 		rf.currentTerm = currentTerm
 		rf.voteFor = voteFor
 		rf.logEntries = logEntries
@@ -185,20 +185,20 @@ type RequestVoteReply struct {
 // AppendEntries RPC arguments structure.
 // Version-0.1 2018-8-26
 
-type AppendEntriesArgs struct{
-	Term int // Leader's term
-	LeaderId int
-	PreLogIndex int // index of log entry immediately preceding new ones.
-	PreLogTerm int // Term of preLogIndex entry
-	Entries []raftLog // log entries to store(empty for heartbeat; may sent more than one for efficiency
-	LeaderCommit int // Leader's commitIndex
+type AppendEntriesArgs struct {
+	Term         int // Leader's term
+	LeaderId     int
+	PreLogIndex  int       // index of log entry immediately preceding new ones.
+	PreLogTerm   int       // Term of preLogIndex entry
+	Entries      []raftLog // log entries to store(empty for heartbeat; may sent more than one for efficiency
+	LeaderCommit int       // Leader's commitIndex
 }
 
 //
 // AppendEntries RPC reply structure.
 // Version-0.1 2018-8-26
-type AppendEntriesReply struct{
-	Term int // current Term for leader to update itself
+type AppendEntriesReply struct {
+	Term    int  // current Term for leader to update itself
 	Success bool //
 }
 
@@ -207,20 +207,20 @@ type AppendEntriesReply struct{
 //
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
-	if args.Term < rf.currentTerm{
+	if args.Term < rf.currentTerm {
 		reply.Term = rf.currentTerm
 		reply.VoteGranted = false
 		return
-	}else{
+	} else {
 		//Whether the voteFor is null or candidateId
-		if rf.voteFor != args.CandidateID{
+		if rf.voteFor != args.CandidateID {
 			reply.Term = rf.currentTerm
 			reply.VoteGranted = false
 			return
-		}else{
+		} else {
 			//Whether the candidate's log is at least to up-to-date as receiver's log
 			rfLogSize := len(rf.logEntries)
-			if(args.LastLogTerm>=rf.logEntries[rfLogSize].term && args.LastLogIndex>=rfLogSize){
+			if args.LastLogTerm >= rf.logEntries[rfLogSize].term && args.LastLogIndex >= rfLogSize {
 				reply.Term = rf.currentTerm
 				reply.VoteGranted = true
 				return
@@ -229,13 +229,34 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	}
 }
 
-func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply){
+//
+// version-0.1 2018-08-27
+//
+func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	reply.Term = rf.currentTerm
 	if args.Term < rf.currentTerm {
 		reply.Success = false
 		return
-	}else{
-		args.
+	} else {
+		rfLastLogIndex := len(rf.logEntries)
+		rfLastLogTerm := rf.logEntries[rfLastLogIndex].term
+
+		//check the consistency of two logs
+		if args.PreLogIndex != rfLastLogIndex || args.PreLogTerm != rfLastLogTerm {
+			reply.Success = false
+			return
+		} else {
+			//delete the inconsistent log entries
+			if args.PreLogIndex < len(rf.logEntries) {
+				rf.logEntries = rf.logEntries[0:args.PreLogIndex]
+			}
+			rf.logEntries.append(args.Entries)
+			if args.LeaderCommit > rf.commitIndex {
+
+			}
+			reply.Success = true
+			return
+		}
 	}
 
 }
@@ -277,7 +298,7 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 //
 // version-0.1 2018-8-26
 //
-func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool{
+func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
 	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
 	return ok
 }
