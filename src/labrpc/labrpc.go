@@ -120,7 +120,8 @@ func (e *ClientEnd) Call(svcMeth string, args interface{}, reply interface{}) bo
 }
 
 type Network struct {
-	mu             sync.Mutex
+	mu sync.Mutex
+
 	reliable       bool
 	longDelays     bool                        // pause a long time on send on disabled connection
 	longReordering bool                        // sometimes delay replies a long time
@@ -215,13 +216,16 @@ func (rn *Network) IsServerDead(endname interface{}, servername interface{}, ser
 func (rn *Network) ProcessReq(req reqMsg) {
 	enabled, servername, server, reliable, longreordering := rn.ReadEndnameInfo(req.endname)
 
+	//客户端和服务器可用
 	if enabled && servername != nil && server != nil {
+		//网络是不可靠的，延迟
 		if reliable == false {
 			// short delay
 			ms := (rand.Int() % 27)
 			time.Sleep(time.Duration(ms) * time.Millisecond)
 		}
 
+		//随机让网络长延迟
 		if reliable == false && (rand.Int()%1000) < 100 {
 			// drop the request, return as if timeout
 			req.replyCh <- replyMsg{false, nil}
@@ -303,7 +307,7 @@ func (rn *Network) ProcessReq(req reqMsg) {
 
 }
 
-//MakeEnd create a client end-point.
+// MakeEnd create a client end-point.
 // start the thread that listens and delivers.
 func (rn *Network) MakeEnd(endname interface{}) *ClientEnd {
 	rn.mu.Lock()
@@ -318,9 +322,6 @@ func (rn *Network) MakeEnd(endname interface{}) *ClientEnd {
 	e.ch = rn.endCh //ch      chan reqMsg  copy of Network.endCh
 	e.done = rn.done
 	rn.ends[endname] = e //Add end into network
-	for key, value := range rn.ends {
-		rn.ends[key] = value
-	}
 	rn.enabled[endname] = false
 	rn.connections[endname] = nil
 
@@ -343,7 +344,7 @@ func (rn *Network) DeleteServer(servername interface{}) {
 	rn.servers[servername] = nil
 }
 
-//Connect connect a ClientEnd to a server.
+// Connect connect a ClientEnd to a server.
 // a ClientEnd can only be connected once in its lifetime.
 func (rn *Network) Connect(endname interface{}, servername interface{}) {
 	rn.mu.Lock()
@@ -386,14 +387,14 @@ type Server struct {
 	count    int // incoming RPCs
 }
 
-//MakeServer ...
+// MakeServer ...
 func MakeServer() *Server {
 	rs := &Server{}
 	rs.services = map[string]*Service{}
 	return rs
 }
 
-//AddService ...
+// AddService ...
 func (rs *Server) AddService(svc *Service) {
 	rs.mu.Lock()
 	defer rs.mu.Unlock()

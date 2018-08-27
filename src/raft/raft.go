@@ -23,6 +23,7 @@ import (
 
 	"labgob"
 	"labrpc"
+	"log"
 )
 
 // import "bytes"
@@ -144,6 +145,18 @@ func (rf *Raft) readPersist(data []byte) {
 	//   rf.xxx = xxx
 	//   rf.yyy = yyy
 	// }
+	r := bytes.NewBuffer(data)
+	d := labgob.NewDecoder(r)
+	var currentTerm int
+	var voteFor int
+	var logEntries []raftLog
+	if d.Decode(&currentTerm)!=nil || d.Decode(&voteFor)!= nil || d.Decode(&logEntries) != nil {
+		log.Fatal("The data is not complete")
+	}else{
+		rf.currentTerm = currentTerm
+		rf.voteFor = voteFor
+		rf.logEntries = logEntries
+	}
 }
 
 //
@@ -169,10 +182,62 @@ type RequestVoteReply struct {
 }
 
 //
+// AppendEntries RPC arguments structure.
+// Version-0.1 2018-8-26
+
+type AppendEntriesArgs struct{
+	Term int // Leader's term
+	LeaderId int
+	PreLogIndex int // index of log entry immediately preceding new ones.
+	PreLogTerm int // Term of preLogIndex entry
+	Entries []raftLog // log entries to store(empty for heartbeat; may sent more than one for efficiency
+	LeaderCommit int // Leader's commitIndex
+}
+
+//
+// AppendEntries RPC reply structure.
+// Version-0.1 2018-8-26
+type AppendEntriesReply struct{
+	Term int // current Term for leader to update itself
+	Success bool //
+}
+
+//
 // example RequestVote RPC handler.
 //
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
+	if args.Term < rf.currentTerm{
+		reply.Term = rf.currentTerm
+		reply.VoteGranted = false
+		return
+	}else{
+		//Whether the voteFor is null or candidateId
+		if rf.voteFor != args.CandidateID{
+			reply.Term = rf.currentTerm
+			reply.VoteGranted = false
+			return
+		}else{
+			//Whether the candidate's log is at least to up-to-date as receiver's log
+			rfLogSize := len(rf.logEntries)
+			if(args.LastLogTerm>=rf.logEntries[rfLogSize].term && args.LastLogIndex>=rfLogSize){
+				reply.Term = rf.currentTerm
+				reply.VoteGranted = true
+				return
+			}
+		}
+	}
+}
+
+func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply){
+	reply.Term = rf.currentTerm
+	if args.Term < rf.currentTerm {
+		reply.Success = false
+		return
+	}else{
+		args.
+	}
+
 }
 
 //
@@ -206,6 +271,14 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 //
 func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) bool {
 	ok := rf.peers[server].Call("Raft.RequestVote", args, reply)
+	return ok
+}
+
+//
+// version-0.1 2018-8-26
+//
+func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool{
+	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
 	return ok
 }
 
