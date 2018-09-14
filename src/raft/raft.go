@@ -106,6 +106,7 @@ type Raft struct {
 	chanHeartBeat chan bool
 	chanGrantVote chan bool
 	chanLeader    chan bool
+	chanCommit    chan bool
 }
 
 //GetState ...
@@ -218,8 +219,9 @@ type AppendEntriesArgs struct {
 // AppendEntries RPC reply structure.
 // Version-0.1 2018-8-26
 type AppendEntriesReply struct {
-	Term    int  // current Term for leader to update itself
-	Success bool //
+	Term      int  // current Term for leader to update itself
+	Success   bool //
+	NextIndex int
 }
 
 func (rf *Raft) getLastIndex() int {
@@ -280,32 +282,53 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	defer rf.mu.Unlock()
 	defer rf.persist()
 
-	reply.Term = rf.currentTerm
-	if args.Term < rf.currentTerm {
+	if args.Term < rf.currentTerm { //Stale Term
+		reply.Term = rf.currentTerm
 		reply.Success = false
 		return
 	} else {
-		rfLastLogIndex := len(rf.logEntries)
-		rfLastLogTerm := rf.logEntries[rfLastLogIndex].term
+		if args.Term > rf.currentTerm {
+			rf.state = Follower //more update
+			rf.currentTerm = args.Term
+			rf.voteFor = voteForNULL
+			rf.persist()
+		}
+		reply.Term = rf.currentTerm
+		rf.chanHeartBeat <- true
+
+		lastIndex := rf.getLastIndex()
 
 		//check the consistency of two logs
-		if args.PreLogIndex != rfLastLogIndex || args.PreLogTerm != rfLastLogTerm {
+		if lastIndex < args.PreLogIndex {
+			reply.NextIndex = lastIndex + 1
 			reply.Success = false
 			return
 		} else {
-			//delete the inconsistent log entries
-			if args.PreLogIndex < len(rf.logEntries) {
+			//check the consistency of two logs
+			if rf.logEntries[args.PreLogIndex].term != args.PreLogTerm {
+				reply.NextIndex = args.PreLogIndex
+				reply.Success = false
+				return
+			} else {
+				//delete the inconsistent log entries
 				rf.logEntries = rf.logEntries[0:args.PreLogIndex]
+				for _, log := range args.Entries {
+					rf.logEntries = append(rf.logEntries, log)
+				}
+				reply.NextIndex = len(rf.logEntries)
+				reply.Success = true
+				if args.LeaderCommit > rf.commitIndex {
+					if args.LeaderCommit > len(rf.logEntries) {
+						rf.commitIndex = len(rf.logEntries)
+					} else {
+						rf.commitIndex = args.LeaderCommit
+					}
+					rf.chanCommit <- true
+				}
+				return
 			}
-			//rf.logEntries.append(args.Entries)
-			if args.LeaderCommit > rf.commitIndex {
-
-			}
-			reply.Success = true
-			return
 		}
 	}
-
 }
 
 //
@@ -343,7 +366,7 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 	defer rf.mu.Unlock()
 
 	if ok {
-		if rf.state == Candidate {
+		if rf.state != Candidate {
 			return ok
 		}
 		if reply.VoteGranted == false {
@@ -369,7 +392,40 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 //
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
 	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	if ok {
+		if rf.state != Leader {
+			return ok
+		}
+		rf.nextIndex[server] = reply.NextIndex
+		if reply.Success == false {
+			if reply.Term > args.Term { //stale Term
+				rf.state = Follower
+				rf.voteFor = voteForNULL
+				rf.currentTerm = reply.Term
+				rf.persist()
+				return ok
+			}
+		} else {
+			rf.matchIndex[server] = args.PreLogIndex + len(args.Entries)
+		}
+	}
 	return ok
+}
+
+//
+// version-0.1 2018-8-26
+//
+func (rf *Raft) broadcastRequestVote() {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	go func() {
+		for _, i := range rf.peers {
+
+		}
+
+	}()
 }
 
 //
