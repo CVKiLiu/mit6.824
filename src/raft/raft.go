@@ -421,11 +421,31 @@ func (rf *Raft) broadcastRequestVote() {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	go func() {
-		for _, i := range rf.peers {
+		for i, _ := range rf.peers {
+			if i != rf.me && rf.state == Candidate {
+				args := RequestVoteArgs{}
+				args.Term = rf.currentTerm
+				args.CandidateID = rf.me
+				args.LastLogIndex = rf.getLastIndex()
+				args.LastLogTerm = rf.getLastTerm()
 
+				reply := RequestVoteReply{}
+				go func(i int, args RequestVoteArgs) {
+					rf.sendRequestVote(i, &args, &reply)
+				}(i, args)
+			}
 		}
-
 	}()
+}
+
+//
+// version-0.1 2018-09-15
+//
+// condition:
+// rf is Leader
+//
+func (rf *Raft) broadcastAppendEntries() {
+
 }
 
 //
