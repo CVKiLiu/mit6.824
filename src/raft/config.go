@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"mit6.824/src/labrpc"
+	"labrpc"
 )
 
 func randstring(n int) string {
@@ -158,7 +158,6 @@ func (cfg *config) start1(i int) {
 		_, curFile, curLine, ok := runtime.Caller(1)
 		logContext.append(strings.Trim(path.Base(curFile), "go"))
 		for key, value := range cfg.net.ends {
-
 		}
 	*/
 
