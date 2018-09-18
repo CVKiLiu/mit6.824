@@ -111,6 +111,7 @@ type Raft struct {
 	chanLeader    chan bool
 	chanCommit    chan bool
 	apply         ApplyMsg
+	filename      string
 }
 
 //GetState ...
@@ -241,6 +242,7 @@ func (rf *Raft) getLastTerm() int {
 //
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
+	rf.raftInfoLog(rf.filename, "-----BeforeRequestVoteRPC-----")
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	defer rf.persist()
@@ -261,32 +263,34 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		}
 		reply.Term = rf.currentTerm
 
-		/*
-			//Whether the candidate's log is at least to up-to-date as receiver's log
-			lastTerm := rf.getLastTerm()
-			lastIndex := rf.getLastIndex()
-			if (args.LastLogTerm >= lastTerm && args.LastLogIndex >= lastIndex)&&( rf.voteFor != voteForNULL || rf.voteFor != args.CandidateID) {
-				rf.chanGrantVote <- true
-				rf.state = Follower
-				rf.voteFor = args.CandidateID
-				reply.VoteGranted = true
-			}*/
+		//Whether the candidate's log is at least to up-to-date as receiver's log
+		lastTerm := rf.getLastTerm()
+		lastIndex := rf.getLastIndex()
+		if (args.LastLogTerm >= lastTerm && args.LastLogIndex >= lastIndex) && (rf.voteFor != voteForNULL || rf.voteFor != args.CandidateID) {
+			rf.chanGrantVote <- true
+			rf.state = Follower
+			rf.voteFor = args.CandidateID
+			reply.VoteGranted = true
+		}
 
 		//Whether the voteFor is null or candidateId
-		if rf.voteFor != voteForNULL || rf.voteFor != args.CandidateID {
-			reply.Term = rf.currentTerm
-			reply.VoteGranted = false
-		} else {
-			//Whether the candidate's log is at least to up-to-date as receiver's log
-			lastTerm := rf.getLastTerm()
-			lastIndex := rf.getLastIndex()
-			if (args.LastLogTerm >= lastTerm && args.LastLogIndex >= lastIndex) && (rf.voteFor != voteForNULL || rf.voteFor != args.CandidateID) {
-				rf.chanGrantVote <- true
-				rf.state = Follower
-				rf.voteFor = args.CandidateID
-				reply.VoteGranted = true
-			}
-		}
+		/*
+			if rf.voteFor != voteForNULL || rf.voteFor != args.CandidateID {
+				reply.Term = rf.currentTerm
+				reply.VoteGranted = false
+			} else {
+				//Whether the candidate's log is at least to up-to-date as receiver's log
+				lastTerm := rf.getLastTerm()
+				lastIndex := rf.getLastIndex()
+				if (args.LastLogTerm >= lastTerm && args.LastLogIndex >= lastIndex) && (rf.voteFor != voteForNULL || rf.voteFor != args.CandidateID) {
+					rf.chanGrantVote <- true
+					rf.state = Follower
+					rf.voteFor = args.CandidateID
+					reply.VoteGranted = true
+				}
+			}*/
+		rf.raftInfoLog(rf.filename, "-----AfterRequestVoteRPC-----")
+		return
 	}
 }
 
@@ -299,15 +303,18 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	defer rf.mu.Unlock()
 	defer rf.persist()
 
+	rf.raftInfoLog(rf.filename, "-----BeforeAppendEntriesRPC-----"+strconv.Itoa(args.LeaderId))
 	if args.Term < rf.currentTerm { //Stale Term
 		reply.Term = rf.currentTerm
 		reply.Success = false
+		rf.raftInfoLog(rf.filename, "test")
 		return
 	} else {
 		if args.Term > rf.currentTerm {
 			rf.state = Follower //more update
 			rf.currentTerm = args.Term
 			rf.voteFor = voteForNULL
+			rf.voteCount = 0
 			rf.persist()
 		}
 		reply.Term = rf.currentTerm
@@ -319,13 +326,11 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		if lastIndex < args.PreLogIndex {
 			reply.NextIndex = lastIndex + 1
 			reply.Success = false
-			return
 		} else {
 			//check the consistency of two logs
 			if rf.logEntries[args.PreLogIndex].Term != args.PreLogTerm {
 				reply.NextIndex = args.PreLogIndex //back to previous
 				reply.Success = false
-				return
 			} else {
 				//delete the inconsistent log entries
 				rf.logEntries = rf.logEntries[0:args.PreLogIndex]
@@ -340,12 +345,13 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 					} else {
 						rf.commitIndex = args.LeaderCommit
 					}
-					// rf.chanCommit <- true   //update commit
+					rf.chanCommit <- true //update commit
 				}
-				return
 			}
 		}
 	}
+	rf.raftInfoLog(rf.filename, "-----AfterAppendEntriesRPC-----")
+	return
 }
 
 //
@@ -631,7 +637,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
 
-	filename := "Raft_" + start.Format(time.ANSIC) + "_" + strconv.Itoa(rf.me) + ".log"
+	rf.filename = "Raft_" + start.Format(time.ANSIC) + "_" + strconv.Itoa(rf.me) + ".log"
 
 	go func() {
 		for {
@@ -641,17 +647,17 @@ func Make(peers []*labrpc.ClientEnd, me int,
 				println("Follower:", rf.me)
 				select {
 				case <-rf.chanHeartBeat:
-					rf.raftInfoLog(filename, "-----chanHeartBeat-----")
+					rf.raftInfoLog(rf.filename, "-----chanHeartBeat-----")
 				case <-rf.chanGrantVote:
-					rf.raftInfoLog(filename, "-----chanGrantVote-----")
+					rf.raftInfoLog(rf.filename, "-----chanGrantVote-----")
 				case <-time.After(time.Duration(time.Millisecond * time.Duration(rand.Int63()%250+450))):
-					rf.raftInfoLog(filename, "-----ElectionTimeout-----")
 					rf.state = Candidate
-					rf.raftInfoLog(filename, "transform to Candidate")
+					rf.raftInfoLog(rf.filename, "-----ElectionTimeout-----")
 				}
 			case Leader:
-				println("Leader:", rf.me)
+				println("Leader", rf.me)
 				rf.broadcastAppendEntries()
+				rf.raftInfoLog(rf.filename, "-----Leader-----")
 				time.Sleep(HEARTBEATINTERVAL)
 			case Candidate:
 				println("Candidate:", rf.me)
@@ -659,13 +665,13 @@ func Make(peers []*labrpc.ClientEnd, me int,
 				rf.broadcastRequestVote()
 
 				select {
-				case <-time.After(time.Duration(time.Millisecond * time.Duration(rand.Int63()%250+500))):
-					rf.raftInfoLog(filename, "----candidate Timeout-----")
+				case <-time.After(time.Duration(time.Millisecond * time.Duration(rand.Int63()%250+1000))):
+					rf.raftInfoLog(rf.filename, "----Candidate Timeout-----")
 				case <-rf.chanHeartBeat:
-					rf.raftInfoLog(filename, "-----chanHeartBeat-----")
+					rf.raftInfoLog(rf.filename, "-----chanHeartBeat-----")
 					rf.backToFollower()
 				case <-rf.chanLeader: //被选举为Leader
-					rf.raftInfoLog(filename, "-----chanLeader-----")
+					rf.raftInfoLog(rf.filename, "-----chanLeader-----")
 					rf.leaderInitilized()
 
 				}
