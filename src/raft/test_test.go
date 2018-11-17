@@ -11,9 +11,6 @@ package raft
 import "testing"
 import "fmt"
 import "time"
-import "math/rand"
-import "sync/atomic"
-import "sync"
 
 // The tester generously allows solutions to complete elections in one second
 // (much more than the paper's range of timeouts).
@@ -83,6 +80,7 @@ func TestReElection2A(t *testing.T) {
 	cfg.end()
 }
 
+/*
 func TestBasicAgree2B(t *testing.T) {
 	servers := 5
 	cfg := make_config(t, servers, false)
@@ -933,3 +931,4 @@ func TestReliableChurn2C(t *testing.T) {
 func TestUnreliableChurn2C(t *testing.T) {
 	internalChurn(t, true)
 }
+*/

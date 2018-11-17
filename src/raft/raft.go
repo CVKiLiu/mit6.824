@@ -118,7 +118,6 @@ type Raft struct {
 // return currentTerm and whether this server
 // believes it is the leader.
 func (rf *Raft) GetState() (int, bool) {
-
 	var term int
 	var isleader bool
 	// Your code here (2A).
@@ -242,7 +241,7 @@ func (rf *Raft) getLastTerm() int {
 //
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
-	rf.raftInfoLog(rf.filename, "-----BeforeRequestVoteRPC-----")
+	//rf.raftInfoLog(rf.filename, "-----BeforeRequestVoteRPC-----")
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	defer rf.persist()
@@ -289,7 +288,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 					reply.VoteGranted = true
 				}
 			}*/
-		rf.raftInfoLog(rf.filename, "-----AfterRequestVoteRPC-----")
+		//rf.raftInfoLog(rf.filename, "-----AfterRequestVoteRPC-----")
 		return
 	}
 }
@@ -303,15 +302,16 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	defer rf.mu.Unlock()
 	defer rf.persist()
 
-	rf.raftInfoLog(rf.filename, "-----BeforeAppendEntriesRPC-----"+strconv.Itoa(args.LeaderId))
+	//rf.raftInfoLog(rf.filename, "-----BeforeAppendEntriesRPC-----"+strconv.Itoa(args.LeaderId))
 	if args.Term < rf.currentTerm { //Stale Term
 		reply.Term = rf.currentTerm
 		reply.Success = false
-		rf.raftInfoLog(rf.filename, "test")
+		//rf.raftInfoLog(rf.filename, "test")
 		return
 	} else {
 		if args.Term > rf.currentTerm {
 			rf.state = Follower //more update
+			rf.isLeader = false
 			rf.currentTerm = args.Term
 			rf.voteFor = voteForNULL
 			rf.voteCount = 0
@@ -350,7 +350,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			}
 		}
 	}
-	rf.raftInfoLog(rf.filename, "-----AfterAppendEntriesRPC-----")
+	//rf.raftInfoLog(rf.filename, "-----AfterAppendEntriesRPC-----")
 	return
 }
 
@@ -628,10 +628,10 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.commitIndex = 0
 	rf.lastApplied = 0
 
-	rf.chanCommit = make(chan bool)
-	rf.chanHeartBeat = make(chan bool)
-	rf.chanGrantVote = make(chan bool)
-	rf.chanLeader = make(chan bool)
+	rf.chanCommit = make(chan bool, 1)
+	rf.chanHeartBeat = make(chan bool, 1)
+	rf.chanGrantVote = make(chan bool, 1)
+	rf.chanLeader = make(chan bool, 1)
 	rf.apply = ApplyMsg{}
 
 	// initialize from state persisted before a crash
@@ -641,44 +641,42 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	go func() {
 		for {
-			println(rf.me)
 			switch rf.state {
 			case Follower:
-				println("Follower:", rf.me)
 				select {
 				case <-rf.chanHeartBeat:
-					rf.raftInfoLog(rf.filename, "-----chanHeartBeat-----")
+					//rf.raftInfoLog(rf.filename, "-----chanHeartBeat-----")
 				case <-rf.chanGrantVote:
-					rf.raftInfoLog(rf.filename, "-----chanGrantVote-----")
+					//rf.raftInfoLog(rf.filename, "-----chanGrantVote-----")
 				case <-time.After(time.Duration(time.Millisecond * time.Duration(rand.Int63()%250+450))):
+					rf.mu.Lock()
 					rf.state = Candidate
-					rf.raftInfoLog(rf.filename, "-----ElectionTimeout-----")
+					rf.isLeader = false
+					rf.mu.Unlock()
+					//rf.raftInfoLog(rf.filename, "-----ElectionTimeout-----")
 				}
 			case Leader:
-				println("Leader", rf.me)
 				rf.broadcastAppendEntries()
-				rf.raftInfoLog(rf.filename, "-----Leader-----")
+				//rf.raftInfoLog(rf.filename, "-----Leader-----")
 				time.Sleep(HEARTBEATINTERVAL)
 			case Candidate:
-				println("Candidate:", rf.me)
 				rf.candidateInitilized()
 				rf.broadcastRequestVote()
 
 				select {
 				case <-time.After(time.Duration(time.Millisecond * time.Duration(rand.Int63()%250+1000))):
-					rf.raftInfoLog(rf.filename, "----Candidate Timeout-----")
+					//rf.raftInfoLog(rf.filename, "----Candidate Timeout-----")
+					rf.backToFollower()
 				case <-rf.chanHeartBeat:
-					rf.raftInfoLog(rf.filename, "-----chanHeartBeat-----")
+					//rf.raftInfoLog(rf.filename, "-----chanHeartBeat-----")
 					rf.backToFollower()
 				case <-rf.chanLeader: //被选举为Leader
-					rf.raftInfoLog(rf.filename, "-----chanLeader-----")
+					//rf.raftInfoLog(rf.filename, "-----chanLeader-----")
 					rf.leaderInitilized()
-
 				}
 			}
 		}
 	}()
-
 	go func() {
 		for {
 			switch {
@@ -694,6 +692,5 @@ func Make(peers []*labrpc.ClientEnd, me int,
 			}
 		}
 	}()
-
 	return rf
 }
