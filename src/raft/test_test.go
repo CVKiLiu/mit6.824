@@ -10,7 +10,9 @@ package raft
 
 import "testing"
 import "fmt"
-import "time"
+import (
+	"time"
+)
 
 // The tester generously allows solutions to complete elections in one second
 // (much more than the paper's range of timeouts).
@@ -80,7 +82,6 @@ func TestReElection2A(t *testing.T) {
 	cfg.end()
 }
 
-/*
 func TestBasicAgree2B(t *testing.T) {
 	servers := 5
 	cfg := make_config(t, servers, false)
@@ -104,6 +105,7 @@ func TestBasicAgree2B(t *testing.T) {
 	cfg.end()
 }
 
+/*
 func TestFailAgree2B(t *testing.T) {
 	servers := 3
 	cfg := make_config(t, servers, false)

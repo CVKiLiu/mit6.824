@@ -69,6 +69,7 @@ const (
 
 	HEARTBEATINTERVAL = 50 * time.Millisecond
 	voteForNULL       = -1
+	MAXLOGLEN         = 10000
 )
 
 //
@@ -229,11 +230,19 @@ type AppendEntriesReply struct {
 }
 
 func (rf *Raft) getLastIndex() int {
-	return rf.logEntries[len(rf.logEntries)-1].Index
+	if len(rf.logEntries) > 0 {
+		return len(rf.logEntries) - 1
+	} else {
+		return -1
+	}
 }
 
 func (rf *Raft) getLastTerm() int {
-	return rf.logEntries[len(rf.logEntries)-1].Term
+	if len(rf.logEntries) > 0 {
+		return rf.logEntries[len(rf.logEntries)-1].Term
+	} else {
+		return -1
+	}
 }
 
 //
@@ -302,11 +311,9 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	defer rf.mu.Unlock()
 	defer rf.persist()
 
-	//rf.raftInfoLog(rf.filename, "-----BeforeAppendEntriesRPC-----"+strconv.Itoa(args.LeaderId))
 	if args.Term < rf.currentTerm { //Stale Term
 		reply.Term = rf.currentTerm
 		reply.Success = false
-		//rf.raftInfoLog(rf.filename, "test")
 		return
 	} else {
 		if args.Term > rf.currentTerm {
@@ -328,12 +335,15 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			reply.Success = false
 		} else {
 			//check the consistency of two logs
-			if rf.logEntries[args.PreLogIndex].Term != args.PreLogTerm {
+			if args.PreLogIndex > -1 && rf.logEntries[args.PreLogIndex].Term != args.PreLogTerm {
 				reply.NextIndex = args.PreLogIndex //back to previous
 				reply.Success = false
 			} else {
 				//delete the inconsistent log entries
-				rf.logEntries = rf.logEntries[0:args.PreLogIndex]
+				if args.PreLogIndex > -1 {
+					rf.logEntries = rf.logEntries[0:args.PreLogIndex]
+				}
+
 				for _, aLog := range args.Entries {
 					rf.logEntries = append(rf.logEntries, aLog)
 				}
@@ -350,7 +360,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			}
 		}
 	}
-	//rf.raftInfoLog(rf.filename, "-----AfterAppendEntriesRPC-----")
 	return
 }
 
@@ -450,7 +459,6 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 					}
 				}
 			}
-
 		}
 	}
 	return ok
@@ -499,8 +507,13 @@ func (rf *Raft) broadcastAppendEntries() {
 				args.LeaderId = rf.me
 				args.LeaderCommit = rf.commitIndex
 				args.PreLogIndex = rf.nextIndex[i] - 1
-				args.PreLogTerm = rf.logEntries[args.PreLogIndex].Term
-				args.Entries = rf.logEntries[rf.nextIndex[i]:]
+				if args.PreLogIndex > 0 {
+					args.PreLogTerm = rf.logEntries[args.PreLogIndex].Term
+					args.Entries = rf.logEntries[args.PreLogIndex-1:]
+				} else {
+					args.PreLogTerm = -1
+					args.Entries = make([]raftLog, 0)
+				}
 
 				reply := AppendEntriesReply{}
 				rf.sendAppendEntries(i, &args, &reply)
@@ -528,10 +541,33 @@ func (rf *Raft) broadcastAppendEntries() {
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	index := -1
 	term := -1
-	isLeader := true
+	isLeader := false
 
 	// Your code here (2B).
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
 
+	if rf.isLeader == true {
+		isLeader = true
+		//日志编号从0开始
+		index = len(rf.logEntries)
+		term = rf.currentTerm
+
+		var buf bytes.Buffer
+		enc := labgob.NewEncoder(&buf)
+		err := enc.Encode(command)
+		if err != nil {
+			panic(err)
+		}
+		newLog := &raftLog{
+			Command: buf.Bytes(),
+			Term:    term,
+			Index:   index,
+		}
+		rf.logEntries = append(rf.logEntries, *newLog)
+		//logEntries change
+		rf.persist()
+	}
 	return index, term, isLeader
 }
 
@@ -620,13 +656,15 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// Your initialization code here (2A, 2B, 2C).
 
 	rf.state = Follower
+	//Term从0开始
 	rf.currentTerm = -1
-	rf.logEntries = make([]raftLog, 10000)
+	rf.logEntries = make([]raftLog, 0, MAXLOGLEN)
 	rf.voteFor = voteForNULL
 	rf.voteCount = 0
 
-	rf.commitIndex = 0
-	rf.lastApplied = 0
+	//日志编号从0开始
+	rf.commitIndex = -1
+	rf.lastApplied = -1
 
 	rf.chanCommit = make(chan bool, 1)
 	rf.chanHeartBeat = make(chan bool, 1)
@@ -645,19 +683,15 @@ func Make(peers []*labrpc.ClientEnd, me int,
 			case Follower:
 				select {
 				case <-rf.chanHeartBeat:
-					//rf.raftInfoLog(rf.filename, "-----chanHeartBeat-----")
 				case <-rf.chanGrantVote:
-					//rf.raftInfoLog(rf.filename, "-----chanGrantVote-----")
 				case <-time.After(time.Duration(time.Millisecond * time.Duration(rand.Int63()%250+450))):
 					rf.mu.Lock()
 					rf.state = Candidate
 					rf.isLeader = false
 					rf.mu.Unlock()
-					//rf.raftInfoLog(rf.filename, "-----ElectionTimeout-----")
 				}
 			case Leader:
 				rf.broadcastAppendEntries()
-				//rf.raftInfoLog(rf.filename, "-----Leader-----")
 				time.Sleep(HEARTBEATINTERVAL)
 			case Candidate:
 				rf.candidateInitilized()
@@ -665,13 +699,10 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 				select {
 				case <-time.After(time.Duration(time.Millisecond * time.Duration(rand.Int63()%250+1000))):
-					//rf.raftInfoLog(rf.filename, "----Candidate Timeout-----")
 					rf.backToFollower()
 				case <-rf.chanHeartBeat:
-					//rf.raftInfoLog(rf.filename, "-----chanHeartBeat-----")
 					rf.backToFollower()
 				case <-rf.chanLeader: //被选举为Leader
-					//rf.raftInfoLog(rf.filename, "-----chanLeader-----")
 					rf.leaderInitilized()
 				}
 			}
