@@ -59,7 +59,7 @@ type raftLog struct {
 	Index   int
 }
 
-type raftState int
+type raftState uint32
 
 const (
 	_ raftState = iota
@@ -250,18 +250,21 @@ func (rf *Raft) getLastTerm() int {
 //
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
-	//rf.raftInfoLog(rf.filename, "-----BeforeRequestVoteRPC-----")
+
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	defer rf.persist()
 
 	reply.VoteGranted = false
 
-	if args.Term < rf.currentTerm {
+	if args.Term < rf.currentTerm { //Candidate has Stale term
 		reply.Term = rf.currentTerm
 		return
 	} else {
 
+		//If Candidate's Term is larger than this raft peer.
+		//We should change this peer's state to follower
+		//Whatever it's current state is Leader or Candidate and update it's currentTerm.
 		if args.Term > rf.currentTerm {
 			rf.currentTerm = args.Term
 			rf.state = Follower
@@ -274,30 +277,21 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		//Whether the candidate's log is at least to up-to-date as receiver's log
 		lastTerm := rf.getLastTerm()
 		lastIndex := rf.getLastIndex()
-		if (args.LastLogTerm >= lastTerm && args.LastLogIndex >= lastIndex) && (rf.voteFor != voteForNULL || rf.voteFor != args.CandidateID) {
+		/**
+		up-to-date
+		- If the logs have last entries with different terms, then the log with the later term is more up-to date
+		- If the logs end with the same term, the which log is longer is more up-to-date
+		*/
+		if (args.LastLogTerm >= lastTerm) && (rf.voteFor != voteForNULL || rf.voteFor != args.CandidateID) {
+			if args.LastLogTerm == lastTerm && args.LastLogIndex < lastIndex {
+				return
+			}
 			rf.chanGrantVote <- true
 			rf.state = Follower
 			rf.voteFor = args.CandidateID
 			reply.VoteGranted = true
 		}
 
-		//Whether the voteFor is null or candidateId
-		/*
-			if rf.voteFor != voteForNULL || rf.voteFor != args.CandidateID {
-				reply.Term = rf.currentTerm
-				reply.VoteGranted = false
-			} else {
-				//Whether the candidate's log is at least to up-to-date as receiver's log
-				lastTerm := rf.getLastTerm()
-				lastIndex := rf.getLastIndex()
-				if (args.LastLogTerm >= lastTerm && args.LastLogIndex >= lastIndex) && (rf.voteFor != voteForNULL || rf.voteFor != args.CandidateID) {
-					rf.chanGrantVote <- true
-					rf.state = Follower
-					rf.voteFor = args.CandidateID
-					reply.VoteGranted = true
-				}
-			}*/
-		//rf.raftInfoLog(rf.filename, "-----AfterRequestVoteRPC-----")
 		return
 	}
 }
@@ -327,37 +321,48 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		reply.Term = rf.currentTerm
 		rf.chanHeartBeat <- true
 
-		lastIndex := rf.getLastIndex()
+		if len(args.Entries) != 0 {
+			lastIndex := rf.getLastIndex()
 
-		//check the consistency of two logs
-		if lastIndex < args.PreLogIndex {
-			reply.NextIndex = lastIndex + 1
-			reply.Success = false
-		} else {
 			//check the consistency of two logs
-			if args.PreLogIndex > -1 && rf.logEntries[args.PreLogIndex].Term != args.PreLogTerm {
-				reply.NextIndex = args.PreLogIndex //back to previous
+			if lastIndex < args.PreLogIndex {
+				reply.NextIndex = lastIndex + 1
 				reply.Success = false
 			} else {
-				//delete the inconsistent log entries
-				if args.PreLogIndex > -1 {
-					rf.logEntries = rf.logEntries[0:args.PreLogIndex]
+				if args.PreLogIndex <= -1 {
+					reply.NextIndex = 0
+					//Clean the log
+					rf.logEntries = make([]raftLog, 0)
+					reply.Success = false
+
+				} else {
+					//check the consistency of two logs
+					if rf.logEntries[args.PreLogIndex].Term != args.PreLogTerm {
+						reply.NextIndex = args.PreLogIndex //back to previous
+						reply.Success = false
+					} else {
+						//delete the inconsistent log entries
+						rf.logEntries = rf.logEntries[0:args.PreLogIndex]
+
+						for _, aLog := range args.Entries {
+							rf.logEntries = append(rf.logEntries, aLog)
+						}
+						reply.NextIndex = rf.getLastIndex() + 1
+						reply.Success = true
+
+					}
+
 				}
 
-				for _, aLog := range args.Entries {
-					rf.logEntries = append(rf.logEntries, aLog)
-				}
-				reply.NextIndex = rf.getLastIndex() + 1
-				reply.Success = true
-				if args.LeaderCommit > rf.commitIndex {
-					if args.LeaderCommit > len(rf.logEntries) {
-						rf.commitIndex = len(rf.logEntries)
-					} else {
-						rf.commitIndex = args.LeaderCommit
-					}
-					rf.chanCommit <- true //update commit
-				}
 			}
+		}
+		if args.LeaderCommit > rf.commitIndex {
+			if args.LeaderCommit > len(rf.logEntries) {
+				rf.commitIndex = len(rf.logEntries)
+			} else {
+				rf.commitIndex = args.LeaderCommit
+			}
+			rf.chanCommit <- true //update commit
 		}
 	}
 	return
@@ -430,13 +435,16 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	if ok {
-		if rf.state != Leader {
+		if rf.state != Leader { //not Leader anymore
 			return ok
 		}
 		rf.nextIndex[server] = reply.NextIndex
 		if reply.Success == false {
 			if reply.Term > args.Term { //stale Term, so rf transform to follower
-				rf.backToFollower()
+				rf.state = Follower
+				rf.voteCount = 0
+				rf.voteFor = voteForNULL
+				rf.isLeader = false
 				rf.currentTerm = reply.Term
 				rf.persist()
 				return ok
@@ -446,7 +454,7 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 			if rf.matchIndex[server] > rf.commitIndex {
 				for i := rf.commitIndex + 1; i <= rf.matchIndex[server]; i++ {
 					commitCount := 0
-					for j, _ := range rf.peers {
+					for j := range rf.peers {
 						if rf.matchIndex[j] >= i {
 							commitCount += 1
 						}
@@ -490,15 +498,42 @@ func (rf *Raft) broadcastRequestVote() {
 }
 
 //
-// version-0.1 2018-09-15
+
+//
 //
 // condition:
 // rf is Leader
 //
 func (rf *Raft) broadcastAppendEntries() {
+	//version-0.2 2018-11-20
 	rf.mu.Lock()
-	defer rf.mu.Unlock()
+	MultiArgs := make([]AppendEntriesArgs, len(rf.peers))
+	for i, args := range MultiArgs {
+		args.Term = rf.currentTerm
+		args.LeaderCommit = rf.commitIndex
+		args.PreLogIndex = rf.nextIndex[i] - 1
+		if args.PreLogIndex > -1 {
+			args.PreLogTerm = rf.logEntries[args.PreLogIndex].Term
+			args.Entries = rf.logEntries[rf.nextIndex[i]:]
+		} else {
+			args.PreLogTerm = -1
+			args.Entries = make([]raftLog, 0)
+		}
+	}
+	rf.mu.Unlock()
+	for i := range rf.peers {
+		if i != rf.me && rf.state == Leader {
+			go func(i int, args AppendEntriesArgs) {
 
+				reply := AppendEntriesReply{}
+				rf.sendAppendEntries(i, &args, &reply)
+
+			}(i, MultiArgs[i])
+
+		}
+	}
+	// version-0.1 2018-09-15
+	/**
 	for i := range rf.peers {
 		if i != rf.me && rf.state == Leader {
 			go func(i int) {
@@ -521,7 +556,8 @@ func (rf *Raft) broadcastAppendEntries() {
 			}(i)
 
 		}
-	}
+	}*/
+
 }
 
 //
@@ -592,7 +628,7 @@ func (rf *Raft) leaderInitilized() {
 
 	for i := range rf.peers {
 		rf.nextIndex[i] = rf.getLastIndex() + 1
-		rf.matchIndex[i] = 0
+		rf.matchIndex[i] = -1
 	}
 }
 
@@ -666,7 +702,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.commitIndex = -1
 	rf.lastApplied = -1
 
-	rf.chanCommit = make(chan bool, 1)
+	rf.chanCommit = make(chan bool, MAXLOGLEN)
 	rf.chanHeartBeat = make(chan bool, 1)
 	rf.chanGrantVote = make(chan bool, 1)
 	rf.chanLeader = make(chan bool, 1)
