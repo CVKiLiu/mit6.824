@@ -25,9 +25,9 @@ type rfLogger struct {
 	start time.Time
 }
 
-func newlogger(rf Raft, start time.Time) rfLogger {
+func newlogger(rf *Raft, start time.Time) rfLogger {
 	rl := rfLogger{
-		raft:  &rf,
+		raft:  rf,
 		start: start,
 	}
 	return rl
@@ -35,7 +35,7 @@ func newlogger(rf Raft, start time.Time) rfLogger {
 
 func (rl *rfLogger) raftInfo(prefix logPrefix, info interface{}) {
 
-	filename := LOG_ENTRIES_INFO + "_" + rl.start.Format(time.ANSIC) + strconv.Itoa(rl.raft.me) + ".log"
+	filename := LOG_ENTRIES_INFO + "_" + rl.start.Format(time.ANSIC) + "_" + strconv.Itoa(rl.raft.me) + ".log"
 	file, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	defer file.Close()
 	if err != nil {

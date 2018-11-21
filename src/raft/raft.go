@@ -348,21 +348,21 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 						}
 						reply.NextIndex = rf.getLastIndex() + 1
 						reply.Success = true
-
+						if args.LeaderCommit > rf.commitIndex {
+							if args.LeaderCommit > len(rf.logEntries) {
+								rf.commitIndex = len(rf.logEntries)
+							} else {
+								rf.commitIndex = args.LeaderCommit
+							}
+							rf.chanCommit <- true //update commit
+						}
 					}
 
 				}
 
 			}
 		}
-		if args.LeaderCommit > rf.commitIndex {
-			if args.LeaderCommit > len(rf.logEntries) {
-				rf.commitIndex = len(rf.logEntries)
-			} else {
-				rf.commitIndex = args.LeaderCommit
-			}
-			rf.chanCommit <- true //update commit
-		}
+
 	}
 	return
 }
@@ -727,7 +727,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
 
-	rf.logger = newlogger(*rf, start)
+	rf.logger = newlogger(rf, start)
 
 	go func() {
 		for {
@@ -735,8 +735,11 @@ func Make(peers []*labrpc.ClientEnd, me int,
 			case Follower:
 				select {
 				case <-rf.chanHeartBeat:
+					rf.logger.raftInfo(INFO, "chanHeartBeat")
 				case <-rf.chanGrantVote:
+					rf.logger.raftInfo(INFO, "chanGrantVote")
 				case <-time.After(time.Duration(time.Millisecond * time.Duration(rand.Int63()%250+450))):
+					rf.logger.raftInfo(INFO, "No Leader, become candidate")
 					rf.mu.Lock()
 					rf.state = Candidate
 					rf.isLeader = false
@@ -744,6 +747,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 				}
 			case Leader:
 				rf.broadcastAppendEntries()
+				rf.logger.raftInfo(INFO, "Leader")
 				time.Sleep(HEARTBEATINTERVAL)
 			case Candidate:
 				rf.candidateInitilized()
@@ -752,10 +756,13 @@ func Make(peers []*labrpc.ClientEnd, me int,
 				select {
 				case <-time.After(time.Duration(time.Millisecond * time.Duration(rand.Int63()%250+1000))):
 					rf.backToFollower()
+					rf.logger.raftInfo(INFO, "Leader Timeout")
 				case <-rf.chanHeartBeat:
 					rf.backToFollower()
+					rf.logger.raftInfo(INFO, "other become leader")
 				case <-rf.chanLeader: //被选举为Leader
 					rf.leaderInitilized()
+					rf.logger.raftInfo(INFO, "becoming leader")
 				}
 			}
 
@@ -767,7 +774,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 			case <-rf.chanCommit:
 				rf.mu.Lock()
 				commitIndex := rf.commitIndex
-				rf.logger.raftInfo(INFO, fmt.Sprintf("commitIndex: %v \n log_length: %v\n lastApplied: %v", commitIndex, len(rf.logEntries), rf.lastApplied))
+				rf.logger.raftInfo(INFO, fmt.Sprintf("\ncommitIndex: %v \n log_length: %v\n lastApplied: %v", commitIndex, len(rf.logEntries), rf.lastApplied))
 				for i := rf.lastApplied + 1; i <= commitIndex; i++ {
 					msg := ApplyMsg{true, rf.logEntries[i].Command, i}
 					applyCh <- msg
