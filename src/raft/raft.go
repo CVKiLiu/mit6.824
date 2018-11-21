@@ -21,12 +21,11 @@ import (
 	"bytes"
 	"sync"
 
+	"fmt"
 	"labgob"
 	"labrpc"
 	"log"
 	"math/rand"
-	"os"
-	"strconv"
 	"time"
 )
 
@@ -112,7 +111,7 @@ type Raft struct {
 	chanLeader    chan bool
 	chanCommit    chan bool
 	apply         ApplyMsg
-	filename      string
+	logger        rfLogger
 }
 
 //GetState ...
@@ -653,9 +652,10 @@ func (rf *Raft) backToFollower() {
 	rf.voteCount = 0
 }
 
-func (rf *Raft) raftInfoLog(filename string, info interface{}) {
+/*
+func (rf *Raft) raftInfoLog(info interface{}) {
 
-	logFile, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	logFile, err := os.OpenFile(rf.infofilename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	defer logFile.Close()
 	if err != nil {
 		log.Fatalln("open file error")
@@ -671,7 +671,23 @@ func (rf *Raft) raftInfoLog(filename string, info interface{}) {
 	debugLog.Println("=======================")
 	debugLog.Print("\n\n")
 }
-
+func (rf *Raft) raftLogLog(info interface{}){
+	logFile, err := os.OpenFile(rf.logfilename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	defer logFile.Close()
+	if err != nil{
+		log.Fatalln("open file error")
+	}
+	debugLog := log.New(logFile, "[Info]", log.Ltime)
+	debugLog.Println(info)
+	debugLog.Println("------------------------")
+	debugLog.Println("Raft Index:     ", rf.me)
+	debugLog.Println("Raft log:")
+	for _, log := range rf.logEntries{
+		debugLog.Println("Index: ",log.Index, "Term: ", log.Term)
+	}
+	debugLog.Println("------------------------")
+}
+*/
 //
 // the service or tester wants to create a Raft server. the ports
 // of all the Raft servers (including this one) are in peers[]. this
@@ -711,7 +727,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
 
-	rf.filename = "Raft_" + start.Format(time.ANSIC) + "_" + strconv.Itoa(rf.me) + ".log"
+	rf.logger = newlogger(*rf, start)
 
 	go func() {
 		for {
@@ -742,6 +758,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 					rf.leaderInitilized()
 				}
 			}
+
 		}
 	}()
 	go func() {
@@ -750,6 +767,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 			case <-rf.chanCommit:
 				rf.mu.Lock()
 				commitIndex := rf.commitIndex
+				rf.logger.raftInfo(INFO, fmt.Sprintf("commitIndex: %v \n log_length: %v\n lastApplied: %v", commitIndex, len(rf.logEntries), rf.lastApplied))
 				for i := rf.lastApplied + 1; i <= commitIndex; i++ {
 					msg := ApplyMsg{true, rf.logEntries[i].Command, i}
 					applyCh <- msg
