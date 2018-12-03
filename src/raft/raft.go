@@ -54,7 +54,7 @@ type ApplyMsg struct {
 //Each entry contains command for state machine,
 //and term when entry was received by leader(first index is 1)
 type raftLog struct {
-	Command []byte
+	Command interface{}
 	Term    int
 	Index   int
 }
@@ -262,7 +262,10 @@ func rfStateToString(state raftState) string {
 }
 
 func raftLogToString(logEntry raftLog) string {
-	return fmt.Sprintf("Term: %v, Cammand: %v", logEntry.Term, logEntry.Command)
+
+	str := fmt.Sprintf("Term: %v, Cammand: %v", logEntry.Term, logEntry.Command)
+	//fmt.Println(str, logEntry.Command)
+	return str
 }
 
 func raftLogsToString(logEntries []raftLog) []string {
@@ -560,7 +563,7 @@ func (rf *Raft) broadcastAppendEntries() {
 					PreLogIndex:  rfCopy.nextIndex[i] - 1,
 				}
 
-				if args.PreLogIndex > 0 {
+				if args.PreLogIndex >= 0 {
 					args.PreLogTerm = rfCopy.logEntries[args.PreLogIndex].Term
 					args.Entries = rfCopy.logEntries[args.PreLogIndex-1:]
 					fmt.Printf("Leader %v broadcasts AppendEntries to peer %v, log entries : %v\n", rfCopy.me, i, raftLogsToString(args.Entries))
@@ -580,57 +583,57 @@ func (rf *Raft) broadcastAppendEntries() {
 
 	//version-0.2 2018-11-20
 	/*
-		rf.mu.Lock()
-		MultiArgs := make([]AppendEntriesArgs, len(rf.peers))
-		for i, args := range MultiArgs {
-			args.Term = rf.currentTerm
-			args.LeaderCommit = rf.commitIndex
-			args.PreLogIndex = rf.nextIndex[i] - 1
-			if args.PreLogIndex > -1 {
-				args.PreLogTerm = rf.logEntries[args.PreLogIndex].Term
-				args.Entries = rf.logEntries[rf.nextIndex[i]:]
-			} else {
-				args.PreLogTerm = -1
-				args.Entries = make([]raftLog, 0)
+			rf.mu.Lock()
+			MultiArgs := make([]AppendEntriesArgs, len(rf.peers))
+			for i, args := range MultiArgs {
+				args.Term = rf.currentTerm
+				args.LeaderCommit = rf.commitIndex
+				args.PreLogIndex = rf.nextIndex[i] - 1
+				if args.PreLogIndex > -1 {
+					args.PreLogTerm = rf.logEntries[args.PreLogIndex].Term
+					args.Entries = rf.logEntries[rf.nextIndex[i]:]
+				} else {
+					args.PreLogTerm = -1
+					args.Entries = make([]raftLog, 0)
+				}
 			}
-		}
-		rf.mu.Unlock()
-		for i := range rf.peers {
-			if i != rf.me && rf.state == Leader {
-				go func(i int, args AppendEntriesArgs) {
+			rf.mu.Unlock()
+			for i := range rf.peers {
+				if i != rf.me && rf.state == Leader {
+					go func(i int, args AppendEntriesArgs) {
 
-					reply := AppendEntriesReply{}
-					rf.sendAppendEntries(i, &args, &reply)
+						reply := AppendEntriesReply{}
+						rf.sendAppendEntries(i, &args, &reply)
 
-				}(i, MultiArgs[i])
+					}(i, MultiArgs[i])
 
+				}
 			}
-		}
-		// version-0.1 2018-09-15
-	    /*
-		for i := range rf.peers {
-			if i != rf.me && rf.state == Leader {
-				go func(i int) {
-					args := AppendEntriesArgs{}
-					args.Term = rf.currentTerm
-					args.LeaderId = rf.me
-					args.LeaderCommit = rf.commitIndex
-					args.PreLogIndex = rf.nextIndex[i] - 1
-					if args.PreLogIndex > 0 {
-						args.PreLogTerm = rf.logEntries[args.PreLogIndex].Term
-						args.Entries = rf.logEntries[args.PreLogIndex-1:]
-					} else {
-						args.PreLogTerm = -1
-						args.Entries = make([]raftLog, 0)
-					}
+			// version-0.1 2018-09-15
+		    /*
+			for i := range rf.peers {
+				if i != rf.me && rf.state == Leader {
+					go func(i int) {
+						args := AppendEntriesArgs{}
+						args.Term = rf.currentTerm
+						args.LeaderId = rf.me
+						args.LeaderCommit = rf.commitIndex
+						args.PreLogIndex = rf.nextIndex[i] - 1
+						if args.PreLogIndex > 0 {
+							args.PreLogTerm = rf.logEntries[args.PreLogIndex].Term
+							args.Entries = rf.logEntries[args.PreLogIndex-1:]
+						} else {
+							args.PreLogTerm = -1
+							args.Entries = make([]raftLog, 0)
+						}
 
-					reply := AppendEntriesReply{}
-					rf.sendAppendEntries(i, &args, &reply)
+						reply := AppendEntriesReply{}
+						rf.sendAppendEntries(i, &args, &reply)
 
-				}(i)
+					}(i)
 
-			}
-		}*/
+				}
+			}*/
 
 }
 
@@ -663,14 +666,15 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		index = len(rf.logEntries)
 		term = rf.currentTerm
 
-		var buf bytes.Buffer
-		enc := labgob.NewEncoder(&buf)
-		err := enc.Encode(command)
-		if err != nil {
-			panic(err)
-		}
+		/*
+			var buf bytes.Buffer
+			enc := labgob.NewEncoder(&buf)
+			err := enc.Encode(command)
+			if err != nil {
+				panic(err)
+			}*/
 		newLog := raftLog{
-			Command: buf.Bytes(),
+			Command: command,
 			Term:    rf.currentTerm,
 			Index:   index,
 		}
