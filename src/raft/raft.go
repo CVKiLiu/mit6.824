@@ -278,7 +278,7 @@ func raftLogsToString(logEntries []raftLog) []string {
 
 func (rf *Raft) getLastIndex() int {
 	if len(rf.logEntries) > 0 {
-		return len(rf.logEntries) - 1
+		return rf.logEntries[len(rf.logEntries)-1].Index
 	} else {
 		return 0
 	}
@@ -287,6 +287,14 @@ func (rf *Raft) getLastIndex() int {
 func (rf *Raft) getLastTerm() int {
 	if len(rf.logEntries) > 0 {
 		return rf.logEntries[len(rf.logEntries)-1].Term
+	} else {
+		return 0
+	}
+}
+
+func (rf *Raft) getTerm(index int) int {
+	if index > 0 {
+		return rf.logEntries[index-1].Term
 	} else {
 		return 0
 	}
@@ -368,38 +376,49 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			if lastIndex < args.PreLogIndex {
 				reply.NextIndex = lastIndex + 1
 				reply.Success = false
+				fmt.Printf("Append entries fail, raft peer: %v 's last index is %v\n , more less than leader.", rf.me, lastIndex)
 			} else {
-				if args.PreLogIndex <= -1 {
-					reply.NextIndex = 0
-					//Clean the log
-					rf.logEntries = make([]raftLog, 0)
+
+				//check the consistency of two logs
+				if rf.getTerm(args.PreLogIndex) != args.PreLogTerm {
+					reply.NextIndex = args.PreLogIndex //back to previous
 					reply.Success = false
-
 				} else {
-					//check the consistency of two logs
-					if rf.logEntries[args.PreLogIndex].Term != args.PreLogTerm {
-						reply.NextIndex = args.PreLogIndex //back to previous
-						reply.Success = false
+					//delete the inconsistent log entries
+					//fmt.Printf("args.PreLogIndex: %v\n", args.PreLogIndex)
+					if args.PreLogIndex == 0 {
+						rf.logEntries = make([]raftLog, 0)
 					} else {
-						//delete the inconsistent log entries
-						rf.logEntries = rf.logEntries[0:args.PreLogIndex]
-
-						for _, aLog := range args.Entries {
-							rf.logEntries = append(rf.logEntries, aLog)
-						}
-						reply.NextIndex = rf.getLastIndex() + 1
-						reply.Success = true
-						if args.LeaderCommit > rf.commitIndex {
-							if args.LeaderCommit > len(rf.logEntries) {
-								rf.commitIndex = len(rf.logEntries)
-							} else {
-								rf.commitIndex = args.LeaderCommit
-							}
-							rf.chanCommit <- true //update commit
-						}
+						rf.logEntries = rf.logEntries[0 : args.PreLogIndex-1]
 					}
 
+					for _, aLog := range args.Entries {
+						rf.logEntries = append(rf.logEntries, aLog)
+						fmt.Printf("raft peer %v append log: %v\n current logs is %v\n", rf.me, raftLogToString(aLog), raftLogsToString(rf.logEntries))
+					}
+					reply.NextIndex = rf.getLastIndex() + 1
+					reply.Success = true
+					if args.LeaderCommit > rf.commitIndex {
+						if args.LeaderCommit > len(rf.logEntries) {
+							rf.commitIndex = len(rf.logEntries)
+						} else {
+							rf.commitIndex = args.LeaderCommit
+						}
+						dropAndSet(rf.chanCommit)
+						//rf.chanCommit <- true //update commit
+					}
 				}
+				/*
+					if args.PreLogIndex <= -1 {
+						reply.NextIndex = 0
+						//Clean the log
+						rf.logEntries = make([]raftLog, 0)
+						reply.Success = false
+
+					} else {
+
+
+					}*/
 
 			}
 		}
@@ -492,7 +511,10 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 				rf.convertToFollower(reply.Term)
 				rf.persist()
 				return ok
+			} else {
+				rf.nextIndex[server] = reply.NextIndex
 			}
+
 		} else { //Success
 			rf.nextIndex[server] = reply.NextIndex
 			rf.matchIndex[server] = reply.NextIndex - 1
@@ -561,17 +583,27 @@ func (rf *Raft) broadcastAppendEntries() {
 					LeaderId:     rfCopy.me,
 					LeaderCommit: rfCopy.commitIndex,
 					PreLogIndex:  rfCopy.nextIndex[i] - 1,
+					PreLogTerm:   rfCopy.getTerm(rfCopy.nextIndex[i] - 1),
 				}
+				fmt.Printf("rfCopy.nextIndex[i] : %v\n", rfCopy.nextIndex[i])
 
-				if args.PreLogIndex >= 0 {
-					args.PreLogTerm = rfCopy.logEntries[args.PreLogIndex].Term
-					args.Entries = rfCopy.logEntries[args.PreLogIndex-1:]
-					fmt.Printf("Leader %v broadcasts AppendEntries to peer %v, log entries : %v\n", rfCopy.me, i, raftLogsToString(args.Entries))
-				} else {
-					args.PreLogTerm = 0
-					args.Entries = make([]raftLog, 0)
+				args.Entries = rfCopy.logEntries[rfCopy.nextIndex[i]-1:]
+
+				if len(args.Entries) == 0 {
 					fmt.Printf("Leader %v broadcasts Heartbeat to peer %v\n", rf.me, i)
+				} else {
+					fmt.Printf("Leader %v broadcasts AppendEntries to peer %v, log entries : %v\n", rfCopy.me, i, raftLogsToString(args.Entries))
 				}
+				/*
+					if args.PreLogIndex >= 0 {
+						args.PreLogTerm = rfCopy.logEntries[args.PreLogIndex].Term
+						args.Entries = rfCopy.logEntries[rfCopy.nextIndex[i]-1:]
+
+					} else {
+						args.PreLogTerm = 0
+						args.Entries = make([]raftLog, 0)
+						fmt.Printf("Leader %v broadcasts Heartbeat to peer %v\n", rf.me, i)
+					}*/
 
 				reply := &AppendEntriesReply{}
 				rf.sendAppendEntries(i, args, reply)
