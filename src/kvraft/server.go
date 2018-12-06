@@ -4,10 +4,10 @@ import (
 	"log"
 	"sync"
 
-	"mit6.824/src/labgob"
-	"mit6.824/src/labrpc"
-	//"mit6.824/src/raft"
-	"github.com/CVKiLiu/mit6.824/src/raft"
+	"labgob"
+	"labrpc"
+	"raft"
+	//"github.com/CVKiLiu/mit6.824/tree/master/src/raft"
 )
 
 const Debug = 0

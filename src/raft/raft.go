@@ -359,8 +359,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	if args.Term < rf.currentTerm { //Stale Term                          //失败原因1：Term过期
 		reply.Term = rf.currentTerm
 		reply.Success = false
-		DPrintf(" | AppendEntries | [%v] | fail: Stale Term, args.Term[%v], rf.currentTerm[%v]",
-			rf.me, args.Term, rf.currentTerm)
+		//DPrintf(" | AppendEntries | [%v] | fail: Stale Term, args.Term[%v], rf.currentTerm[%v]",
+		//	rf.me, args.Term, rf.currentTerm)
 	} else {
 		if args.Term >= rf.currentTerm {
 			rf.convertToFollower(args.Term)
@@ -378,8 +378,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			if lastIndex < args.PreLogIndex {
 				reply.NextIndex = lastIndex + 1
 				reply.Success = false //失败原因2：日志落后
-				DPrintf("| AppendEntries | [%v] | fail: Stale log, lastIndex:%v",
-					rf.me, lastIndex)
+				//DPrintf("| AppendEntries | [%v] | fail: Stale log, lastIndex:%v",
+				//	rf.me, lastIndex)
 
 			} else {
 				//check the consistency of two logs
@@ -390,8 +390,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 						reply.NextIndex = 1
 					} //back to previous
 					reply.Success = false //失败原因2：日志不一致
-					DPrintf("| AppendEntries | [%v] | fail: logs inconsistent",
-						rf.me)
+					//DPrintf("| AppendEntries | [%v] | fail: logs inconsistent",
+					//	rf.me)
 				} else {
 					//delete the inconsistent log entries
 					if args.PreLogIndex == 0 {
@@ -406,8 +406,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 					reply.NextIndex = rf.getLastIndex() + 1
 					reply.Success = true
 
-					DPrintf("| AppendEntries | [%v] | Success, logs[%v], args.LeaderCommit:%v, rf.commitIndex:%v,currentLogs[%v]",
-						rf.me, raftLogsToString(args.Entries), args.LeaderCommit, rf.commitIndex, raftLogsToString(rf.logEntries))
+					//DPrintf("| AppendEntries | [%v] | Success, logs[%v], args.LeaderCommit:%v, rf.commitIndex:%v,currentLogs[%v]",
+					//	rf.me, raftLogsToString(args.Entries), args.LeaderCommit, rf.commitIndex, raftLogsToString(rf.logEntries))
 				}
 			}
 		}
@@ -497,8 +497,8 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 	if ok {
 		//不再是Leader或者仍然是Leader但是已经不再是曾经的Term
 		if rf.state != Leader || args.Term != rf.currentTerm { //not Leader anymore
-			DPrintf("| sendAppendEntries | [%v]->[%v] | fail: state:[%v], argsTerm[%v], currentTerm[%v]",
-				rf.me, server, rf.state, args.Term, rf.currentTerm)
+			//DPrintf("| sendAppendEntries | [%v]->[%v] | fail: state:[%v], argsTerm[%v], currentTerm[%v]",
+			//	rf.me, server, rf.state, args.Term, rf.currentTerm)
 			return ok
 		}
 		/**
@@ -507,15 +507,15 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 		// fail
 		if reply.Success == false {
 			if reply.Term > args.Term { //stale Term, so rf transform to follower
-				DPrintf("| sendAppendEntries | [%v]->[%v] | fail:stale Term, replyTerm:[%v], argsTerm[%v]",
-					rf.me, server, reply.Term, args.Term)
+				//DPrintf("| sendAppendEntries | [%v]->[%v] | fail:stale Term, replyTerm:[%v], argsTerm[%v]",
+				//	rf.me, server, reply.Term, args.Term)
 				rf.convertToFollower(reply.Term)
 				rf.persist()
 				return ok
 			} else {
 				rf.nextIndex[server] = reply.NextIndex
-				DPrintf("| sendAppendEntries | [%v]->[%v] | fail:log inconsistent, rf.nextIndex[%v]:%v",
-					rf.me, server, server, reply.NextIndex)
+				//DPrintf("| sendAppendEntries | [%v]->[%v] | fail:log inconsistent, rf.nextIndex[%v]:%v",
+				//	rf.me, server, server, reply.NextIndex)
 			}
 
 		} else { //Success
@@ -540,8 +540,8 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 						}
 					}
 				}
-				DPrintf("| sendAppendEntries | [%v]->[%v] | success, rf.nextIndex[%v]:[%v], rf.matchIndex[%v]:[%v],rf.commitIndex:[%v]",
-					rf.me, server, server, rf.nextIndex[server], server, rf.matchIndex[server], rf.commitIndex)
+				//DPrintf("| sendAppendEntries | [%v]->[%v] | success, rf.nextIndex[%v]:[%v], rf.matchIndex[%v]:[%v],rf.commitIndex:[%v]",
+				//	rf.me, server, server, rf.nextIndex[server], server, rf.matchIndex[server], rf.commitIndex)
 			} else {
 				//DPrintf("| sendHeartBeats | [%v]->[%v]| Success",
 				//	rf.me, server)
@@ -602,8 +602,8 @@ func (rf *Raft) broadcastAppendEntries() {
 					//DPrintf("| broadcastHeartBeats | %v[%v]->[%v]",
 					//	rfStateToString(rf.state), rf.me, i)
 				} else {
-					DPrintf("| broadcastAppendEntries | %v[%v]->[%v] | logs[%v]",
-						rfStateToString(rf.state), rf.me, i, raftLogsToString(args.Entries))
+					//DPrintf("| broadcastAppendEntries | %v[%v]->[%v] | logs[%v]",
+					//	rfStateToString(rf.state), rf.me, i, raftLogsToString(args.Entries))
 				}
 				reply := &AppendEntriesReply{}
 
@@ -650,8 +650,8 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		}
 		rf.logEntries = append(rf.logEntries, newLog)
 		//logEntries change
-		DPrintf("| ->log:[%v] | Leader[%v] , CurrentTerm[%v] , CurrentLog[%v]",
-			raftLogToString(newLog), rf.me, rf.currentTerm, raftLogsToString(rf.logEntries))
+		//DPrintf("| ->log:[%v] | Leader[%v] , CurrentTerm[%v] , CurrentLog[%v]",
+		//	raftLogToString(newLog), rf.me, rf.currentTerm, raftLogsToString(rf.logEntries))
 		rf.persist()
 	}
 	return index, term, isLeader
@@ -775,15 +775,15 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 			select {
 			case <-rf.chanCommit:
-				//rf.mu.Lock()
+				rf.mu.Lock()
 				for i := rf.lastApplied + 1; i <= rf.commitIndex; i++ {
 					msg := ApplyMsg{true, rf.logEntries[i-1].Command, i}
 					applyCh <- msg
 					rf.lastApplied = i
-					DPrintf("| log apply | %v[%v] , CurrentTerm[%v] , CurrentLog[%v] | lastApplied[%v], rf.CommitIndex[%v]",
-						rfStateToString(rf.state), rf.me, rf.currentTerm, raftLogsToString(rf.logEntries), rf.lastApplied, rf.commitIndex)
+					//DPrintf("| log apply | %v[%v] , CurrentTerm[%v] , CurrentLog[%v] | lastApplied[%v], rf.CommitIndex[%v]",
+					//	rfStateToString(rf.state), rf.me, rf.currentTerm, raftLogsToString(rf.logEntries), rf.lastApplied, rf.commitIndex)
 				}
-			//rf.mu.Unlock()
+				rf.mu.Unlock()
 			default:
 			}
 		}
