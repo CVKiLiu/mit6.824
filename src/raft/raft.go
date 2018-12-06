@@ -124,9 +124,9 @@ func (rf *Raft) GetState() (int, bool) {
 	// Your code here (2A).
 	rf.mu.RLock()
 	term = rf.currentTerm
-	//isLeader = rf.state == Leader
+	isLeader := rf.state == Leader
 	rf.mu.RUnlock()
-	return term, rf.state == Leader
+	return term, isLeader
 }
 
 //
@@ -354,18 +354,20 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+	defer rf.persist()
 
-	if args.Term < rf.currentTerm { //Stale Term
+	if args.Term < rf.currentTerm { //Stale Term                          //失败原因1：Term过期
 		reply.Term = rf.currentTerm
 		reply.Success = false
-		rf.persist()
-		return
+		DPrintf(" | AppendEntries | [%v] | fail: Stale Term, args.Term[%v], rf.currentTerm[%v]",
+			rf.me, args.Term, rf.currentTerm)
 	} else {
 		if args.Term >= rf.currentTerm {
 			rf.convertToFollower(args.Term)
 			rf.persist()
 		}
 		reply.Term = rf.currentTerm
+		reply.Success = true
 		dropAndSet(rf.chanHeartBeat)
 
 		//不是单纯的心跳
@@ -375,56 +377,51 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			//check the consistency of two logs
 			if lastIndex < args.PreLogIndex {
 				reply.NextIndex = lastIndex + 1
-				reply.Success = false
-				fmt.Printf("Append entries fail, raft peer: %v 's last index is %v\n , more less than leader.", rf.me, lastIndex)
-			} else {
+				reply.Success = false //失败原因2：日志落后
+				DPrintf("| AppendEntries | [%v] | fail: Stale log, lastIndex:%v",
+					rf.me, lastIndex)
 
+			} else {
 				//check the consistency of two logs
 				if rf.getTerm(args.PreLogIndex) != args.PreLogTerm {
-					reply.NextIndex = args.PreLogIndex //back to previous
-					reply.Success = false
+					if args.PreLogIndex != 0 {
+						reply.NextIndex = args.PreLogIndex
+					} else {
+						reply.NextIndex = 1
+					} //back to previous
+					reply.Success = false //失败原因2：日志不一致
+					DPrintf("| AppendEntries | [%v] | fail: logs inconsistent",
+						rf.me)
 				} else {
 					//delete the inconsistent log entries
-					//fmt.Printf("args.PreLogIndex: %v\n", args.PreLogIndex)
 					if args.PreLogIndex == 0 {
-						rf.logEntries = make([]raftLog, 0)
+						rf.logEntries = make([]raftLog, 0) //清零
 					} else {
-						rf.logEntries = rf.logEntries[0 : args.PreLogIndex-1]
+						rf.logEntries = rf.logEntries[0:args.PreLogIndex]
 					}
 
 					for _, aLog := range args.Entries {
 						rf.logEntries = append(rf.logEntries, aLog)
-						fmt.Printf("raft peer %v append log: %v\n current logs is %v\n", rf.me, raftLogToString(aLog), raftLogsToString(rf.logEntries))
 					}
 					reply.NextIndex = rf.getLastIndex() + 1
 					reply.Success = true
-					if args.LeaderCommit > rf.commitIndex {
-						if args.LeaderCommit > len(rf.logEntries) {
-							rf.commitIndex = len(rf.logEntries)
-						} else {
-							rf.commitIndex = args.LeaderCommit
-						}
-						dropAndSet(rf.chanCommit)
-						//rf.chanCommit <- true //update commit
-					}
+
+					DPrintf("| AppendEntries | [%v] | Success, logs[%v], args.LeaderCommit:%v, rf.commitIndex:%v,currentLogs[%v]",
+						rf.me, raftLogsToString(args.Entries), args.LeaderCommit, rf.commitIndex, raftLogsToString(rf.logEntries))
 				}
-				/*
-					if args.PreLogIndex <= -1 {
-						reply.NextIndex = 0
-						//Clean the log
-						rf.logEntries = make([]raftLog, 0)
-						reply.Success = false
-
-					} else {
-
-
-					}*/
-
 			}
+		}
+		if args.LeaderCommit > rf.commitIndex {
+			if args.LeaderCommit > len(rf.logEntries) {
+				rf.commitIndex = len(rf.logEntries)
+
+			} else {
+				rf.commitIndex = args.LeaderCommit
+			}
+			dropAndSet(rf.chanCommit)
 		}
 
 	}
-	rf.persist()
 	return
 }
 
@@ -500,6 +497,8 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 	if ok {
 		//不再是Leader或者仍然是Leader但是已经不再是曾经的Term
 		if rf.state != Leader || args.Term != rf.currentTerm { //not Leader anymore
+			DPrintf("| sendAppendEntries | [%v]->[%v] | fail: state:[%v], argsTerm[%v], currentTerm[%v]",
+				rf.me, server, rf.state, args.Term, rf.currentTerm)
 			return ok
 		}
 		/**
@@ -508,34 +507,46 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 		// fail
 		if reply.Success == false {
 			if reply.Term > args.Term { //stale Term, so rf transform to follower
+				DPrintf("| sendAppendEntries | [%v]->[%v] | fail:stale Term, replyTerm:[%v], argsTerm[%v]",
+					rf.me, server, reply.Term, args.Term)
 				rf.convertToFollower(reply.Term)
 				rf.persist()
 				return ok
 			} else {
 				rf.nextIndex[server] = reply.NextIndex
+				DPrintf("| sendAppendEntries | [%v]->[%v] | fail:log inconsistent, rf.nextIndex[%v]:%v",
+					rf.me, server, server, reply.NextIndex)
 			}
 
 		} else { //Success
-			rf.nextIndex[server] = reply.NextIndex
-			rf.matchIndex[server] = reply.NextIndex - 1
-			//当发现某一个peer匹配的序号已经大于当前Leader所commit的序号时，就要去检查是否有过半数commit了
-			if rf.matchIndex[server] > rf.commitIndex {
-				for i := rf.commitIndex + 1; i <= rf.matchIndex[server]; i++ {
-					var commitCount uint32
-					commitCount = 0
-					for j := range rf.peers {
-						if rf.matchIndex[j] >= i {
-							commitCount += 1
+			if len(args.Entries) != 0 { //不是心跳
+				rf.nextIndex[server] = reply.NextIndex
+				rf.matchIndex[server] = reply.NextIndex - 1
+				//当发现某一个peer匹配的序号已经大于当前Leader所commit的序号时，就要去检查是否有过半数commit了
+				if rf.matchIndex[server] > rf.commitIndex {
+					for i := rf.commitIndex + 1; i <= rf.matchIndex[server]; i++ {
+						var commitCount uint32
+						commitCount = 0
+						for j := range rf.peers {
+							if rf.matchIndex[j] >= i {
+								commitCount += 1
+							}
+						}
+						if atomic.LoadUint32(&commitCount) >= uint32(len(rf.peers)/2) {
+							rf.commitIndex += 1
+							dropAndSet(rf.chanCommit)
+						} else {
+							break
 						}
 					}
-					if atomic.LoadUint32(&commitCount) > uint32(len(rf.peers)/2) {
-						rf.commitIndex += 1
-						dropAndSet(rf.chanCommit)
-					} else {
-						break
-					}
 				}
+				DPrintf("| sendAppendEntries | [%v]->[%v] | success, rf.nextIndex[%v]:[%v], rf.matchIndex[%v]:[%v],rf.commitIndex:[%v]",
+					rf.me, server, server, rf.nextIndex[server], server, rf.matchIndex[server], rf.commitIndex)
+			} else {
+				//DPrintf("| sendHeartBeats | [%v]->[%v]| Success",
+				//	rf.me, server)
 			}
+
 		}
 	}
 	return ok
@@ -557,7 +568,8 @@ func (rf *Raft) broadcastRequestVote() {
 					LastLogTerm:  rfCopy.getLastTerm(),
 				}
 				reply := &RequestVoteReply{}
-				fmt.Printf("Candidate %v broadcasts RequestVote to peer %v\n", rfCopy.me, i)
+				//DPrintf("| broadcastRequest | %v[%v]->[%v]",
+				//	rfStateToString(rf.state), rf.me, i)
 				rf.sendRequestVote(i, args, reply)
 			}(i, rfCopy)
 		}
@@ -585,88 +597,21 @@ func (rf *Raft) broadcastAppendEntries() {
 					PreLogIndex:  rfCopy.nextIndex[i] - 1,
 					PreLogTerm:   rfCopy.getTerm(rfCopy.nextIndex[i] - 1),
 				}
-				fmt.Printf("rfCopy.nextIndex[i] : %v\n", rfCopy.nextIndex[i])
-
 				args.Entries = rfCopy.logEntries[rfCopy.nextIndex[i]-1:]
-
 				if len(args.Entries) == 0 {
-					fmt.Printf("Leader %v broadcasts Heartbeat to peer %v\n", rf.me, i)
+					//DPrintf("| broadcastHeartBeats | %v[%v]->[%v]",
+					//	rfStateToString(rf.state), rf.me, i)
 				} else {
-					fmt.Printf("Leader %v broadcasts AppendEntries to peer %v, log entries : %v\n", rfCopy.me, i, raftLogsToString(args.Entries))
+					DPrintf("| broadcastAppendEntries | %v[%v]->[%v] | logs[%v]",
+						rfStateToString(rf.state), rf.me, i, raftLogsToString(args.Entries))
 				}
-				/*
-					if args.PreLogIndex >= 0 {
-						args.PreLogTerm = rfCopy.logEntries[args.PreLogIndex].Term
-						args.Entries = rfCopy.logEntries[rfCopy.nextIndex[i]-1:]
-
-					} else {
-						args.PreLogTerm = 0
-						args.Entries = make([]raftLog, 0)
-						fmt.Printf("Leader %v broadcasts Heartbeat to peer %v\n", rf.me, i)
-					}*/
-
 				reply := &AppendEntriesReply{}
-				rf.sendAppendEntries(i, args, reply)
 
+				rf.sendAppendEntries(i, args, reply)
 			}(i, rfCopy)
 
 		}
 	}
-
-	//version-0.2 2018-11-20
-	/*
-			rf.mu.Lock()
-			MultiArgs := make([]AppendEntriesArgs, len(rf.peers))
-			for i, args := range MultiArgs {
-				args.Term = rf.currentTerm
-				args.LeaderCommit = rf.commitIndex
-				args.PreLogIndex = rf.nextIndex[i] - 1
-				if args.PreLogIndex > -1 {
-					args.PreLogTerm = rf.logEntries[args.PreLogIndex].Term
-					args.Entries = rf.logEntries[rf.nextIndex[i]:]
-				} else {
-					args.PreLogTerm = -1
-					args.Entries = make([]raftLog, 0)
-				}
-			}
-			rf.mu.Unlock()
-			for i := range rf.peers {
-				if i != rf.me && rf.state == Leader {
-					go func(i int, args AppendEntriesArgs) {
-
-						reply := AppendEntriesReply{}
-						rf.sendAppendEntries(i, &args, &reply)
-
-					}(i, MultiArgs[i])
-
-				}
-			}
-			// version-0.1 2018-09-15
-		    /*
-			for i := range rf.peers {
-				if i != rf.me && rf.state == Leader {
-					go func(i int) {
-						args := AppendEntriesArgs{}
-						args.Term = rf.currentTerm
-						args.LeaderId = rf.me
-						args.LeaderCommit = rf.commitIndex
-						args.PreLogIndex = rf.nextIndex[i] - 1
-						if args.PreLogIndex > 0 {
-							args.PreLogTerm = rf.logEntries[args.PreLogIndex].Term
-							args.Entries = rf.logEntries[args.PreLogIndex-1:]
-						} else {
-							args.PreLogTerm = -1
-							args.Entries = make([]raftLog, 0)
-						}
-
-						reply := AppendEntriesReply{}
-						rf.sendAppendEntries(i, &args, &reply)
-
-					}(i)
-
-				}
-			}*/
-
 }
 
 //
@@ -694,25 +639,19 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 
 	if rf.state == Leader {
 		isLeader = true
-		//日志编号从0开始
-		index = len(rf.logEntries)
+		//日志编号从1开始
+		index = rf.getLastIndex() + 1
 		term = rf.currentTerm
 
-		/*
-			var buf bytes.Buffer
-			enc := labgob.NewEncoder(&buf)
-			err := enc.Encode(command)
-			if err != nil {
-				panic(err)
-			}*/
 		newLog := raftLog{
 			Command: command,
 			Term:    rf.currentTerm,
 			Index:   index,
 		}
 		rf.logEntries = append(rf.logEntries, newLog)
-		fmt.Printf("Leader %v receive command %v, translate to log %v\n", rf.me, command, raftLogToString(newLog))
 		//logEntries change
+		DPrintf("| ->log:[%v] | Leader[%v] , CurrentTerm[%v] , CurrentLog[%v]",
+			raftLogToString(newLog), rf.me, rf.currentTerm, raftLogsToString(rf.logEntries))
 		rf.persist()
 	}
 	return index, term, isLeader
@@ -760,42 +699,6 @@ func (rf *Raft) convertToFollower(higherTerm int) {
 
 }
 
-/*
-func (rf *Raft) raftInfoLog(info interface{}) {
-
-	logFile, err := os.OpenFile(rf.infofilename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
-	defer logFile.Close()
-	if err != nil {
-		log.Fatalln("open file error")
-	}
-	debugLog := log.New(logFile, "[Info]", log.Ltime)
-	debugLog.Println(info)
-	debugLog.Print("=======================\n")
-	debugLog.Println("Raft Index:     ", rf.me)
-	debugLog.Println("CurrentTerm:    ", rf.currentTerm)
-	debugLog.Println("State:          ", rf.state)
-	debugLog.Println("voteFor:        ", rf.voteFor)
-	debugLog.Println("voteCount:      ", rf.voteCount)
-	debugLog.Println("=======================")
-	debugLog.Print("\n\n")
-}
-func (rf *Raft) raftLogLog(info interface{}){
-	logFile, err := os.OpenFile(rf.logfilename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
-	defer logFile.Close()
-	if err != nil{
-		log.Fatalln("open file error")
-	}
-	debugLog := log.New(logFile, "[Info]", log.Ltime)
-	debugLog.Println(info)
-	debugLog.Println("------------------------")
-	debugLog.Println("Raft Index:     ", rf.me)
-	debugLog.Println("Raft log:")
-	for _, log := range rf.logEntries{
-		debugLog.Println("Index: ",log.Index, "Term: ", log.Term)
-	}
-	debugLog.Println("------------------------")
-}
-*/
 //
 // the service or tester wants to create a Raft server. the ports
 // of all the Raft servers (including this one) are in peers[]. this
@@ -807,7 +710,7 @@ func (rf *Raft) raftLogLog(info interface{}){
 // for any long-running work.
 //
 func Make(peers []*labrpc.ClientEnd, me int,
-	persister *Persister, applyCh chan ApplyMsg, start time.Time) *Raft {
+	persister *Persister, applyCh chan ApplyMsg) *Raft {
 	rf := &Raft{}
 	rf.peers = peers
 	rf.persister = persister
@@ -818,7 +721,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.state = Follower
 	//Term从1开始
 	rf.currentTerm = 0
-	rf.logEntries = make([]raftLog, 0, MAXLOGLEN)
+	rf.logEntries = make([]raftLog, 0, MAXLOGLEN) // len is 0, capacity is MAXLOGLEN
 	rf.voteFor = voteForNULL
 	rf.voteCount = 0
 
@@ -826,7 +729,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.commitIndex = 0
 	rf.lastApplied = 0
 
-	rf.chanCommit = make(chan bool, MAXLOGLEN)
+	rf.chanCommit = make(chan bool, 1)
 	rf.chanHeartBeat = make(chan bool, 1)
 	rf.chanGrantVote = make(chan bool, 1)
 	rf.chanLeader = make(chan bool, 1)
@@ -834,8 +737,6 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
-
-	//logger := newLogger(start)
 
 	go func() {
 		for {
@@ -867,32 +768,26 @@ func Make(peers []*labrpc.ClientEnd, me int,
 					rf.mu.Unlock()
 				}
 			}
-
 		}
 	}()
 	go func() {
-		rf.mu.Lock()
-		defer rf.mu.Unlock()
-		for rf.commitIndex > rf.lastApplied {
-			for i := rf.lastApplied + 1; i <= rf.commitIndex; i++ {
-				msg := ApplyMsg{true, rf.logEntries[i].Command, i}
-				applyCh <- msg
-				rf.lastApplied = i
+		for {
+
+			select {
+			case <-rf.chanCommit:
+				//rf.mu.Lock()
+				for i := rf.lastApplied + 1; i <= rf.commitIndex; i++ {
+					msg := ApplyMsg{true, rf.logEntries[i-1].Command, i}
+					applyCh <- msg
+					rf.lastApplied = i
+					DPrintf("| log apply | %v[%v] , CurrentTerm[%v] , CurrentLog[%v] | lastApplied[%v], rf.CommitIndex[%v]",
+						rfStateToString(rf.state), rf.me, rf.currentTerm, raftLogsToString(rf.logEntries), rf.lastApplied, rf.commitIndex)
+				}
+			//rf.mu.Unlock()
+			default:
 			}
-			/*
-				switch {
-				case <-rf.chanCommit:
-					rf.mu.Lock()
-					commitIndex := rf.commitIndex
-					//logger.raftInfo(*rf ,INFO, fmt.Sprintf("\ncommitIndex: %v \n log_length: %v\n lastApplied: %v", commitIndex, len(rf.logEntries), rf.lastApplied))
-					for i := rf.lastApplied + 1; i <= commitIndex; i++ {
-						msg := ApplyMsg{true, rf.logEntries[i].Command, i}
-						applyCh <- msg
-						rf.lastApplied = i
-					}
-					rf.mu.Unlock()
-				}*/
 		}
+
 	}()
 	return rf
 }

@@ -214,7 +214,7 @@ func (cfg *config) start1(i int) {
 		}
 	}()
 
-	rf := Make(ends, i, cfg.saved[i], applyCh, cfg.start)
+	rf := Make(ends, i, cfg.saved[i], applyCh)
 
 	cfg.mu.Lock()
 	cfg.rafts[i] = rf

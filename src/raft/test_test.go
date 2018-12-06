@@ -105,7 +105,6 @@ func TestBasicAgree2B(t *testing.T) {
 	cfg.end()
 }
 
-/*
 func TestFailAgree2B(t *testing.T) {
 	servers := 3
 	cfg := make_config(t, servers, false)
@@ -137,6 +136,7 @@ func TestFailAgree2B(t *testing.T) {
 	cfg.end()
 }
 
+/*
 func TestFailNoAgree2B(t *testing.T) {
 	servers := 5
 	cfg := make_config(t, servers, false)
