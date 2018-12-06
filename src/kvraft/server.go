@@ -6,7 +6,8 @@ import (
 
 	"mit6.824/src/labgob"
 	"mit6.824/src/labrpc"
-	"mit6.824/src/raft"
+	//"mit6.824/src/raft"
+	"github.com/CVKiLiu/mit6.824/src/raft"
 )
 
 const Debug = 0
