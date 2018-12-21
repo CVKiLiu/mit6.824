@@ -2,7 +2,7 @@
 
 int=1
 cur_time="`date +%Y-%m-%d`"
-rootPath="debugLog/BasicAgree2B"
+rootPath="debugLog/FailAgree2B"
 sudo rm -rf ${rootPath}
 sudo mkdir ${rootPath}
 sudo chmod 777 ${rootPath}
@@ -13,6 +13,6 @@ do
     file="${rootPath}/${cur_time}_${int}.txt"
     sudo touch ${file}
     sudo chmod 777 ${file}
-    go test -run BasicAgree2B > ${file}
+    go test -run FailAgree2B > ${file}
     let "int++"
 done
