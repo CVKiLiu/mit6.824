@@ -359,6 +359,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	defer rf.mu.Unlock()
 	defer rf.persist()
 
+	isIdentical := false
+
 	if args.Term < rf.currentTerm { //Stale Term                          //失败原因1：Term过期
 		reply.Term = rf.currentTerm
 		reply.Success = false
@@ -395,6 +397,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 							reply.NextIndex = args.PreLogIndex
 						} else {
 							reply.NextIndex = 1
+							rf.logEntries = make([]raftLog, 0)
+
 						} //back to previous
 						reply.Success = false //失败原因2：日志不一致
 						DPrintf("| AppendEntries | [%v] | fail: logs inconsistent",
@@ -412,15 +416,62 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 						}
 						reply.NextIndex = rf.getLastIndex() + 1
 						reply.Success = true
-
+						isIdentical = true
 						DPrintf("| AppendEntries | [%v] | Success, logs[%v], args.LeaderCommit:%v, rf.commitIndex:%v,currentLogs[%v]",
 							rf.me, raftLogsToString(args.Entries), args.LeaderCommit, rf.commitIndex, raftLogsToString(rf.logEntries))
 					}
 				}
 
 			}
+		} else {
+			lastIndex := rf.getLastIndex()
+			//check the consistency of two logs
+			if lastIndex < args.PreLogIndex {
+				reply.NextIndex = lastIndex + 1
+				DPrintf("| Heartbeat Consistency check | [%v]->[%v] | fail: Stale log, lastIndex:%v",
+					args.LeaderId, rf.me, lastIndex)
+
+			} else {
+				if rf.commitIndex > args.PreLogIndex {
+					reply.NextIndex = rf.commitIndex + 1
+					reply.Success = false
+				} else {
+					//check the consistency of two logs
+					if rf.getTerm(args.PreLogIndex) != args.PreLogTerm {
+						if args.PreLogIndex != 0 {
+							reply.NextIndex = args.PreLogIndex
+							//rf.logEntries = rf.logEntries[0:args.PreLogIndex]
+						} else {
+							reply.NextIndex = 1
+							rf.logEntries = make([]raftLog, 0) //清零
+						} //back to previous
+						DPrintf("| Heartbeat Consistency check | [%v]->[%v] | fail: logs inconsistent",
+							args.LeaderId, rf.me)
+					} else {
+						//delete the inconsistent log entries
+						if args.PreLogIndex == 0 {
+							rf.logEntries = make([]raftLog, 0) //清零
+						} else {
+							rf.logEntries = rf.logEntries[0:args.PreLogIndex]
+						}
+
+						reply.NextIndex = rf.getLastIndex() + 1
+						isIdentical = true
+
+						DPrintf("| Heartbeat Consistency check | [%v]->[%v] | Success, logs[%v], args.LeaderCommit:%v, rf.commitIndex:%v,currentLogs[%v]",
+							args.LeaderId, rf.me, raftLogsToString(args.Entries), args.LeaderCommit, rf.commitIndex, raftLogsToString(rf.logEntries))
+					}
+				}
+
+			}
+
 		}
-		if args.LeaderCommit > rf.commitIndex {
+
+		DPrintf("| AppendEntries | [%v]->[%v] | update commit index |  args.LeaderCommit:%v, rf.commitIndex:%v",
+			args.LeaderId, rf.me, args.LeaderCommit, rf.commitIndex)
+		if (args.LeaderCommit > rf.commitIndex) && (isIdentical) {
+			DPrintf("| AppendEntries | [%v]->[%v] | update commit index |  args.LeaderCommit:%v,  len(rf.logEntries):%v",
+				args.LeaderId, rf.me, args.LeaderCommit, len(rf.logEntries))
 			if args.LeaderCommit > len(rf.logEntries) {
 				rf.commitIndex = len(rf.logEntries)
 
@@ -662,8 +713,8 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		}
 		rf.logEntries = append(rf.logEntries, newLog)
 		//logEntries change
-		//DPrintf("| ->log:[%v] | Leader[%v] , CurrentTerm[%v] , CurrentLog[%v]",
-		//raftLogToString(newLog), rf.me, rf.currentTerm, raftLogsToString(rf.logEntries))
+		DPrintf("| ->log:[%v] | Leader[%v] , CurrentTerm[%v] , CurrentLog[%v]",
+			raftLogToString(newLog), rf.me, rf.currentTerm, raftLogsToString(rf.logEntries))
 		rf.persist()
 	}
 	return index, term, isLeader
