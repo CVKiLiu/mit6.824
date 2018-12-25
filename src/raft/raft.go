@@ -230,9 +230,11 @@ type AppendEntriesArgs struct {
 // AppendEntries RPC reply structure.
 // Version-0.1 2018-8-26
 type AppendEntriesReply struct {
-	Term      int  // current Term for leader to update itself
-	Success   bool //
-	NextIndex int
+	Term                   int  // current Term for leader to update itself
+	Success                bool //
+	NextIndex              int
+	ConflictTerm           int
+	ConflictTermFirstIndex int
 }
 
 /**
@@ -300,6 +302,36 @@ func (rf *Raft) getTerm(index int) int {
 	}
 }
 
+func (rf *Raft) getTermFirst(term int) int {
+	if len(rf.logEntries) != 0 {
+		for _, logEntry := range rf.logEntries {
+			if logEntry.Term == term {
+				return logEntry.Term
+			}
+		}
+	}
+	return 0
+}
+
+func (rf *Raft) getTermLast(term int) int {
+	last := 0
+	if len(rf.logEntries) != 0 {
+		index := 0
+		for ; index < len(rf.logEntries); index++ {
+			if rf.logEntries[index].Term == term {
+				break
+			}
+		}
+		for ; index < len(rf.logEntries); index++ {
+			if rf.logEntries[index].Term != term {
+				last = index
+				break
+			}
+		}
+	}
+	return last
+}
+
 //
 // example RequestVote RPC handler.
 //
@@ -310,9 +342,12 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	defer rf.mu.Unlock()
 	reply.VoteGranted = false
 
+	DPrintf("| RequestVote [%v]->[%v] | args[ Term: %v, LastLogIndex: %v, LastLogTerm: %v ]",
+		args.CandidateID, rf.me, args.Term, args.LastLogIndex, args.LastLogTerm)
+
 	if args.Term < rf.currentTerm { //Candidate has Stale term
 		reply.Term = rf.currentTerm
-		DPrintf("| RequestVote | [%v]->[%v] | fail: Stale Term, candidateTerm[%v] currentTerm[%v]",
+		DPrintf("| RequestVote [%v]->[%v] | fail: Stale Term, candidateTerm: %v,  currentTerm: %v",
 			args.CandidateID, rf.me, args.Term, rf.currentTerm)
 	} else {
 
@@ -321,8 +356,8 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		//Whatever it's current state is Leader or Candidate and update it's currentTerm.
 		if args.Term > rf.currentTerm {
 			rf.convertToFollower(args.Term)
-			DPrintf("| RequestVote | raft[%v] convert to follower | CandidateTerm[%v], currentTerm[%v]",
-				rf.me, args.Term, rf.currentTerm)
+			DPrintf("| RequestVote [%v]->[%v] | raft[%v] convert to follower | CandidateTerm: %v, currentTerm: %v",
+				args.CandidateID, rf.me, rf.me, args.Term, rf.currentTerm)
 		}
 		reply.Term = rf.currentTerm
 
@@ -342,7 +377,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 			rf.state = Follower
 			rf.voteFor = args.CandidateID
 			reply.VoteGranted = true
-			DPrintf("| RequestVote | raft[%v] vote for raft[%v] | CandidateTerm[%v], currentTerm[%v]",
+			DPrintf("| RequestVote raft[%v] vote for raft[%v] | CandidateTerm[%v], currentTerm[%v]",
 				rf.me, args.CandidateID, args.Term, rf.currentTerm)
 		}
 	}
@@ -361,6 +396,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	isIdentical := false
 
+	DPrintf("| AppendEntries(Heartbeat) [%v]->[%v] | args{ Term: %v, PreLogIndex: %v, PreLogTerm: %v Entries: %v, LeaderCommit: %v",
+		args.LeaderId, rf.me, args.Term, args.PreLogIndex, args.PreLogTerm, raftLogsToString(args.Entries), args.LeaderCommit)
 	if args.Term < rf.currentTerm { //Stale Term                          //失败原因1：Term过期
 		reply.Term = rf.currentTerm
 		reply.Success = false
@@ -439,6 +476,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 					//check the consistency of two logs
 					if rf.getTerm(args.PreLogIndex) != args.PreLogTerm {
 						if args.PreLogIndex != 0 {
+							//conflictTerm := rf.getTerm(args.PreLogIndex)
+							//conflictTermFirst
 							reply.NextIndex = args.PreLogIndex
 							//rf.logEntries = rf.logEntries[0:args.PreLogIndex]
 						} else {
@@ -462,22 +501,18 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 							args.LeaderId, rf.me, raftLogsToString(args.Entries), args.LeaderCommit, rf.commitIndex, raftLogsToString(rf.logEntries))
 					}
 				}
-
 			}
-
 		}
 
-		DPrintf("| AppendEntries | [%v]->[%v] | update commit index |  args.LeaderCommit:%v, rf.commitIndex:%v",
-			args.LeaderId, rf.me, args.LeaderCommit, rf.commitIndex)
 		if (args.LeaderCommit > rf.commitIndex) && (isIdentical) {
-			DPrintf("| AppendEntries | [%v]->[%v] | update commit index |  args.LeaderCommit:%v,  len(rf.logEntries):%v",
-				args.LeaderId, rf.me, args.LeaderCommit, len(rf.logEntries))
 			if args.LeaderCommit > len(rf.logEntries) {
 				rf.commitIndex = len(rf.logEntries)
 
 			} else {
 				rf.commitIndex = args.LeaderCommit
 			}
+			DPrintf("| AppendEntries | [%v]->[%v] | update commit index |  args.LeaderCommit:%v, rf.commitIndex:%v",
+				args.LeaderId, rf.me, args.LeaderCommit, rf.commitIndex)
 			dropAndSet(rf.chanCommit)
 		}
 
@@ -516,7 +551,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 //
 func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) bool {
 	ok := rf.peers[server].Call("Raft.RequestVote", args, reply)
-
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
@@ -558,7 +592,7 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 	if ok {
 		//不再是Leader或者仍然是Leader但是已经不再是曾经的Term
 		if rf.state != Leader || args.Term != rf.currentTerm { //not Leader anymore
-			DPrintf("| sendAppendEntries | [%v]->[%v] | fail: state:[%v], argsTerm[%v], currentTerm[%v]",
+			DPrintf("| sendAppendEntries | [%v]->[%v] | fail: state Term: %v, argsTerm: %v, currentTerm: %v",
 				rf.me, server, rf.state, args.Term, rf.currentTerm)
 			return ok
 		}
@@ -568,7 +602,7 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 		// fail
 		if reply.Success == false {
 			if reply.Term > args.Term { //stale Term, so rf transform to follower
-				DPrintf("| sendAppendEntries | [%v]->[%v] | fail:stale Term, replyTerm:[%v], argsTerm[%v]",
+				DPrintf("| sendAppendEntries | [%v]->[%v] | fail:stale Term, replyTerm: %v, argsTerm: %v",
 					rf.me, server, reply.Term, args.Term)
 				rf.convertToFollower(reply.Term)
 				rf.persist()
@@ -601,13 +635,12 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 						}
 					}
 				}
-				DPrintf("| sendAppendEntries | [%v]->[%v] | success, rf.nextIndex[%v]:[%v], rf.matchIndex[%v]:[%v],rf.commitIndex:[%v]",
+				DPrintf("| sendAppendEntries | [%v]->[%v] | success, rf.nextIndex[%v]: %v, rf.matchIndex[%v]: %v,rf.commitIndex: %v",
 					rf.me, server, server, rf.nextIndex[server], server, rf.matchIndex[server], rf.commitIndex)
 			} else {
-				DPrintf("| sendHeartBeats | [%v]->[%v]| Success",
+				DPrintf("| sendHeartbeats | [%v]->[%v]| Success",
 					rf.me, server)
 			}
-
 		}
 	}
 	return ok
@@ -629,14 +662,13 @@ func (rf *Raft) broadcastRequestVote() {
 					LastLogTerm:  rfCopy.getLastTerm(),
 				}
 				reply := &RequestVoteReply{}
-				DPrintf("| broadcastRequest | %v[%v]->[%v]",
-					rfStateToString(rfCopy.state), rfCopy.me, i)
 				rf.sendRequestVote(i, args, reply)
+
 			}(i, rfCopy)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	rf.mu.RUnlock()
+	defer rf.mu.RUnlock()
 }
 
 //
@@ -660,15 +692,7 @@ func (rf *Raft) broadcastAppendEntries() {
 					PreLogTerm:   rfCopy.getTerm(rfCopy.nextIndex[i] - 1),
 				}
 				args.Entries = rfCopy.logEntries[rfCopy.nextIndex[i]-1:]
-				if len(args.Entries) == 0 {
-					DPrintf("| broadcastHeartBeats | %v[%v]->[%v]",
-						rfStateToString(rfCopy.state), rfCopy.me, i)
-				} else {
-					DPrintf("| broadcastAppendEntries | %v[%v]->[%v] | logs[%v]",
-						rfStateToString(rfCopy.state), rfCopy.me, i, raftLogsToString(args.Entries))
-				}
 				reply := &AppendEntriesReply{}
-
 				rf.sendAppendEntries(i, args, reply)
 			}(i, rfCopy)
 
@@ -750,6 +774,7 @@ func (rf *Raft) convertToCandidate() {
 	rf.currentTerm += 1
 	rf.voteFor = rf.me
 	rf.voteCount = 1
+	DPrintf("| [%v] convert to Candidate, currentTerm: %v", rf.me, rf.currentTerm)
 }
 
 //Discovers server with higher term
@@ -759,7 +784,6 @@ func (rf *Raft) convertToFollower(higherTerm int) {
 	rf.currentTerm = higherTerm
 	rf.voteFor = voteForNULL
 	rf.voteCount = 0
-
 }
 
 //
@@ -845,8 +869,8 @@ func Make(peers []*labrpc.ClientEnd, me int,
 					msg := ApplyMsg{true, rf.logEntries[i-1].Command, i}
 					applyCh <- msg
 					rf.lastApplied = i
-					DPrintf("| log apply | %v[%v] , CurrentTerm[%v] , CurrentLog[%v] | lastApplied[%v], rf.CommitIndex[%v]",
-						rfStateToString(rf.state), rf.me, rf.currentTerm, raftLogsToString(rf.logEntries), rf.lastApplied, rf.commitIndex)
+					DPrintf("| log apply | %v[%v] , CurrentTerm[%v] , CurrentLog[%v] | rf.CommitIndex[%v]",
+						rfStateToString(rf.state), rf.me, rf.currentTerm, raftLogsToString(rf.logEntries), rf.commitIndex)
 				}
 				rf.mu.Unlock()
 			default:
