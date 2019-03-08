@@ -45,9 +45,9 @@ func (rl *rfLogger) raftInfo(raft Raft, prefix logPrefix, info interface{}) {
 	debugLog.Println("Raft Index:     ", raft.me)
 	debugLog.Println("CurrentTerm:    ", raft.currentTerm)
 	debugLog.Println("State:          ", raft.state)
-	debugLog.Println("voteFor:        ", raft.voteFor)
-	debugLog.Println("voteCount:      ", raft.voteCount)
-	debugLog.Println("=======================")
+	//debugLog.Println("voteFor:        ", raft.voteFor)
+	//debugLog.Println("voteCount:      ", raft.voteCount)
+	//debugLog.Println("=======================")
 	debugLog.Print("\n\n")
 }
 
@@ -63,9 +63,9 @@ func (rl *rfLogger) logInfo(raft Raft, prefix logPrefix, info interface{}) {
 	debugLog.Println("------------------------")
 	debugLog.Println("Raft Index:     ", raft.me)
 	debugLog.Println("Raft log")
-	debugLog.Println("length: ", strconv.Itoa(len(raft.logEntries)))
-	for _, log := range raft.logEntries {
-		debugLog.Println("Index: ", log.Index, "Term: ", log.Term)
-	}
+	//debugLog.Println("length: ", strconv.Itoa(len(raft.logEntries)))
+	//for _, log := range raft.logEntries {
+	//	debugLog.Println("Index: ", log.Index, "Term: ", log.Term)
+	//}
 	debugLog.Println("------------------------")
 }
