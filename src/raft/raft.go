@@ -487,6 +487,11 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 	defer rf.mu.Unlock()
 
 	if ok {
+
+		if reply.Term > rf.currentTerm {
+			rf.convertToFollower(reply.Term)
+			rf.persist()
+		}
 		//不再是候选者
 		if rf.state != Candidate {
 			return ok
@@ -496,19 +501,13 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 			return ok
 		}
 		//没有得到选票
-		if reply.VoteGranted == false {
-			if reply.Term > rf.currentTerm {
-				rf.convertToFollower(reply.Term)
-				rf.persist()
-
-			}
-
-		} else { //获得选票
+		if reply.VoteGranted {
+			//获得选票
 			atomic.AddUint32(&rf.voteCount, 1)
-			if atomic.LoadUint32(&rf.voteCount) >= uint32((len(rf.peers)+1)/2) {
-				rf.covertToLeader()
-				dropAndSet(rf.chanLeader)
-			}
+		}
+		if atomic.LoadUint32(&rf.voteCount) >= uint32((len(rf.peers)+1)/2) {
+			rf.covertToLeader()
+			dropAndSet(rf.chanLeader)
 		}
 	}
 	return ok
@@ -584,35 +583,32 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 //
 func (rf *Raft) broadcastRequestVote() {
 	rf.mu.RLock()
+	if rf.state != Candidate {
+		rf.mu.RUnlock()
+		return
+	}
 	me := rf.me
 	allPeer := len(rf.peers)
+	args := &RequestVoteArgs{
+		Term:         rf.currentTerm,
+		CandidateID:  rf.me,
+		LastLogIndex: rf.getLastIndex(),
+		LastLogTerm:  rf.getLastTerm(),
+	}
 	rf.mu.RUnlock()
 	for i := 0; i < allPeer; i++ {
 		if i != me {
-
-			rf.mu.RLock()
-			if rf.state != Candidate {
-				rf.mu.RUnlock()
-				return
-			}
-			go func(i int) {
-				args := &RequestVoteArgs{
-					Term:         rf.currentTerm,
-					CandidateID:  rf.me,
-					LastLogIndex: rf.getLastIndex(),
-					LastLogTerm:  rf.getLastTerm(),
-				}
+			go func(i int, args *RequestVoteArgs) {
 				reply := &RequestVoteReply{}
-				DPrintf("| broadcastRequest | %v[%v]->[%v]",
-					rfStateToString(rf.state), rf.me, i)
+				DPrintf("sendRequestVote(%v=>%v) args:%v", me, i, args)
 				ret := rf.sendRequestVote(i, args, reply)
 				if !ret {
 					return
 				}
-			}(i)
-			rf.mu.RUnlock()
+			}(i, args)
+
 		}
-		time.Sleep(10 * time.Millisecond)
+		//time.Sleep(10 * time.Millisecond)
 	}
 }
 
