@@ -8,7 +8,7 @@ sudo mkdir ${rootPath}
 sudo chmod 777 ${rootPath}
 while(($int<=100))
 do
-#    mkdir debugLog/ConcurrentStarts2B
+    mkdir debugLog/ConcurrentStarts2B
 #    sudo chmod 777 debugLog/ConcurrentStarts2B
     file="${rootPath}/${cur_time}_${int}.txt"
     sudo touch ${file}

@@ -6,10 +6,10 @@ rootPath="debugLog/InitialElection2A"
 sudo rm -rf ${rootPath}
 sudo mkdir ${rootPath}
 sudo chmod 777 ${rootPath}
-while(($int<=10))
+while(($int<=100))
 do
-#    mkdir debugLog/ConcurrentStarts2B
-#    sudo chmod 777 debugLog/ConcurrentStarts2B
+#    mkdir debugLog/InitialElection2A
+#    sudo chmod 777 debugLog/InitialElection2A
     file="${rootPath}/${cur_time}_${int}.txt"
     sudo touch ${file}
     sudo chmod 777 ${file}

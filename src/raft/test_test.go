@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"math/rand"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -510,7 +511,6 @@ loop:
 	cfg.end()
 }
 
-/*
 func TestPersist12C(t *testing.T) {
 	servers := 3
 	cfg := make_config(t, servers, false)
@@ -935,4 +935,3 @@ func TestReliableChurn2C(t *testing.T) {
 func TestUnreliableChurn2C(t *testing.T) {
 	internalChurn(t, true)
 }
-*/
